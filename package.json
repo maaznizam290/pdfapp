@@ -14,7 +14,11 @@
     "@types/react": "19.0.8",
     "@types/react-dom": "19.0.3",
     "aos": "3.0.0-beta.6",
-    "next": "15.1.6",
+    "file-saver": "^2.0.5",
+    "jszip": "^3.10.1",
+    "next": "^15.5.2",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^5.4.54",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "typescript": "^5.7.3"
