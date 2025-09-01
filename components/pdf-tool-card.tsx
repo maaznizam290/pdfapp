@@ -33,6 +33,22 @@ export default function PDFToolCard({ tool }: PDFToolCardProps) {
       'unlock-pdf': '/unlock-pdf',
       'protect-pdf': '/protect-pdf',
       'sign-pdf': '/sign-pdf',
+      'pdf-to-powerpoint': '/pdf-to-powerpoint',
+      'pdf-to-excel': '/pdf-to-excel',
+      'pdf-to-jpg': '/pdf-to-jpg',
+      'powerpoint-to-pdf': '/powerpoint-to-pdf',
+      'excel-to-pdf': '/excel-to-pdf',
+      'jpg-to-pdf': '/jpg-to-pdf',
+      'html-to-pdf': '/html-to-pdf',
+      'organize-pdf': '/organize-pdf',
+      'remove-pages': '/remove-pages',
+      'extract-pages': '/extract-pages',
+      'repair-pdf': '/repair-pdf',
+      'ocr-pdf': '/ocr-pdf',
+      'page-numbers': '/page-numbers',
+      'crop-pdf': '/crop-pdf',
+      'redact-pdf': '/redact-pdf',
+      'compare-pdf': '/compare-pdf',
     };
     return pathMap[toolId] || '/';
   };

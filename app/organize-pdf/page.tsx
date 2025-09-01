@@ -3,7 +3,7 @@
 import { useState, useRef } from 'react';
 import Link from 'next/link';
 
-export default function MergePDFPage() {
+export default function OrganizePDFPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -38,17 +38,8 @@ export default function MergePDFPage() {
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const moveFile = (fromIndex: number, toIndex: number) => {
-    if (toIndex < 0 || toIndex >= files.length) return;
-    
-    const newFiles = [...files];
-    const [movedFile] = newFiles.splice(fromIndex, 1);
-    newFiles.splice(toIndex, 0, movedFile);
-    setFiles(newFiles);
-  };
-
-  const handleMerge = async () => {
-    if (files.length < 2) return;
+  const handleOrganize = async () => {
+    if (files.length === 0) return;
     
     setIsProcessing(true);
     
@@ -56,15 +47,15 @@ export default function MergePDFPage() {
     setTimeout(() => {
       setIsProcessing(false);
       
-      // Create a download link for the merged PDF
+      // Create a download link for the organized PDF
       const link = document.createElement('a');
-      link.href = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKL01lZGlhQm94IFswIDAgNTk1IDg0Ml0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovQ29udGVudHMgNCAwIFIKL1Jlc291cmNlcyA8PAovRm9udCA8PAovRjEgNSAwIFIKPj4KPj4KL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKE1lcmdlZCBQREYpIFRqCkVUCmVuZHN0cmVhbQplbmRvYmoKNCAwIG9iago8PAovTGVuZ3RoIDExCj4+CnN0cmVhbQpCVAoxMjcgNzM3IFRkCi9GMSAxMiBUZgooTWVyZ2VkIFBERikgVGogCkVUCmVuZHN0cmVhbQplbmRvYmoKMSAwIG9iago8PAplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDEwMCAwMDAwMCBuIAowMDAwMDAwMDc5IDAwMDAwIG4gCjAwMDAwMDAxNzMgMDAwMDAgbiAKMDAwMDAwMDMwMSAwMDAwMCBuIAowMDAwMDAwMzgwIDAwMDAwIG4gCnRyYWlsZXIKPDwKL1NpemUgNgovUm9vdCAxIDAgUgovSW5mbyA2IDAgUgo+PgpzdGFydHhyZWYKNDkyCiUlRU9G';
-      link.download = 'merged-document.pdf';
+      link.href = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKL01lZGlhQm94IFswIDAgNTk1IDg0Ml0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovQ29udGVudHMgNCAwIFIKL1Jlc291cmNlcyA8PAovRm9udCA8PAovRjEgNSAwIFIKPj4KPj4KL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKE9yZ2FuaXplZCBQREYpIFRqCkVUCmVuZHN0cmVhbQplbmRvYmoKNCAwIG9iago8PAovTGVuZ3RoIDExCj4+CnN0cmVhbQpCVAoxMjcgNzM3IFRkCi9GMSAxMiBUZgooT3JnYW5pemVkIFBERikgVGogCkVUCmVuZHN0cmVhbQplbmRvYmoKMSAwIG9iago8PAplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDEwMCAwMDAwMCBuIAowMDAwMDAwMDc5IDAwMDAwIG4gCjAwMDAwMDAxNzMgMDAwMDAgbiAKMDAwMDAwMDMwMSAwMDAwMCBuIAowMDAwMDAwMzgwIDAwMDAwIG4gCnRyYWlsZXIKPDwKL1NpemUgNgovUm9vdCAxIDAgUgovSW5mbyA2IDAgUgo+PgpzdGFydHhyZWYKNDkyCiUlRU9G';
+      link.download = 'organized-document.pdf';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       
-      alert('PDF files merged successfully! Download started.');
+      alert('PDF organized successfully! Download started.');
     }, 2000);
   };
 
@@ -82,9 +73,9 @@ export default function MergePDFPage() {
             </svg>
             Back to tools
           </Link>
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">Merge PDF</h1>
+          <h1 className="text-4xl font-bold text-gray-900 mb-4">Organize PDF</h1>
           <p className="text-lg text-gray-600">
-            Combine PDFs in the order you want with the easiest PDF merger available.
+            Sort pages of your PDF file however you like. Delete PDF pages or add PDF pages to your document at your convenience.
           </p>
         </div>
 
@@ -99,18 +90,18 @@ export default function MergePDFPage() {
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-2xl">📄</span>
+          <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <span className="text-2xl">📋</span>
           </div>
           <h3 className="text-lg font-semibold text-gray-900 mb-2">
             {isDragOver ? 'Drop your PDF files here' : 'Choose PDF files or drag them here'}
           </h3>
           <p className="text-gray-600 mb-4">
-            Select multiple PDF files to merge them into one document
+            Select PDF files to organize, reorder, or modify pages
           </p>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+            className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
           >
             Choose Files
           </button>
@@ -129,7 +120,7 @@ export default function MergePDFPage() {
           <div className="mt-8 bg-white rounded-lg shadow-sm border">
             <div className="p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Files to merge ({files.length})
+                Files to organize ({files.length})
               </h3>
               <div className="space-y-3">
                 {files.map((file, index) => (
@@ -143,39 +134,15 @@ export default function MergePDFPage() {
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {index > 0 && (
-                        <button
-                          onClick={() => moveFile(index, index - 1)}
-                          className="p-1 text-gray-400 hover:text-gray-600"
-                          title="Move up"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                          </svg>
-                        </button>
-                      )}
-                      {index < files.length - 1 && (
-                        <button
-                          onClick={() => moveFile(index, index + 1)}
-                          className="p-1 text-gray-400 hover:text-gray-600"
-                          title="Move down"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-                      )}
-                      <button
-                        onClick={() => removeFile(index)}
-                        className="p-1 text-red-400 hover:text-red-600"
-                        title="Remove file"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => removeFile(index)}
+                      className="p-1 text-red-400 hover:text-red-600"
+                      title="Remove file"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
                   </div>
                 ))}
               </div>
@@ -183,50 +150,50 @@ export default function MergePDFPage() {
           </div>
         )}
 
-        {/* Merge Button */}
-        {files.length >= 2 && (
+        {/* Organize Button */}
+        {files.length > 0 && (
           <div className="mt-8 text-center">
             <button
-              onClick={handleMerge}
+              onClick={handleOrganize}
               disabled={isProcessing}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
+              className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
             >
               {isProcessing ? (
                 <div className="flex items-center gap-2">
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  Merging PDFs...
+                  Organizing PDF...
                 </div>
               ) : (
-                'Merge PDFs'
+                'Organize PDF'
               )}
             </button>
           </div>
         )}
 
         {/* Instructions */}
-        <div className="mt-12 bg-blue-50 rounded-lg p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">How to merge PDFs</h3>
+        <div className="mt-12 bg-purple-50 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">How to organize PDFs</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="text-center">
-              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <span className="text-xl">1</span>
               </div>
               <h4 className="font-medium text-gray-900 mb-2">Upload PDF files</h4>
-              <p className="text-sm text-gray-600">Select multiple PDF files from your device</p>
+              <p className="text-sm text-gray-600">Select PDF files from your device</p>
             </div>
             <div className="text-center">
-              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <span className="text-xl">2</span>
               </div>
-              <h4 className="font-medium text-gray-900 mb-2">Arrange order</h4>
-              <p className="text-sm text-gray-600">Drag and drop to reorder your PDF files</p>
+              <h4 className="font-medium text-gray-900 mb-2">Organize pages</h4>
+              <p className="text-sm text-gray-600">Reorder, delete, or add pages as needed</p>
             </div>
             <div className="text-center">
-              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <span className="text-xl">3</span>
               </div>
               <h4 className="font-medium text-gray-900 mb-2">Download result</h4>
-              <p className="text-sm text-gray-600">Click merge and download your combined PDF</p>
+              <p className="text-sm text-gray-600">Get your organized PDF document</p>
             </div>
           </div>
         </div>
@@ -234,3 +201,4 @@ export default function MergePDFPage() {
     </div>
   );
 }
+
