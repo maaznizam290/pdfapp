@@ -2,11 +2,18 @@
 
 import { useState, useRef } from 'react';
 import Link from 'next/link';
+import SuccessModal from '@/components/success-modal';
 
 export default function PowerPointToPDFPage() {
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [processedFileInfo, setProcessedFileInfo] = useState<{
+    fileName: string;
+    fileSize: number;
+    downloadUrl: string;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (selectedFile: File | null) => {
@@ -15,6 +22,8 @@ export default function PowerPointToPDFPage() {
                         selectedFile.name.endsWith('.ppt') ||
                         selectedFile.name.endsWith('.pptx'))) {
       setFile(selectedFile);
+    } else {
+      alert('Please select a valid PowerPoint file (.ppt or .pptx)');
     }
   };
 
@@ -36,23 +45,80 @@ export default function PowerPointToPDFPage() {
   };
 
   const handleConvert = async () => {
-    if (!file) return;
+    if (!file) {
+      alert('Please select a PowerPoint file to convert.');
+      return;
+    }
     
     setIsProcessing(true);
     
-    // Simulate processing
-    setTimeout(() => {
-      setIsProcessing(false);
-      // Here you would implement actual PowerPoint to PDF conversion logic
-      // Create a download link for the converted PDF
+    try {
+      console.log('Starting PowerPoint to PDF conversion with file:', { name: file.name, size: file.size });
+      
+      // Use the convert API endpoint
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('operation', 'powerpoint-to-pdf');
+
+      const response = await fetch('/api/pdf/convert', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('API Error:', errorData);
+        throw new Error(errorData.error || 'Failed to convert PowerPoint to PDF');
+      }
+
+      const blob = await response.blob();
+      console.log('Conversion successful, blob size:', blob.size);
+      
+      if (blob.size === 0) {
+        throw new Error('Generated PDF is empty');
+      }
+      
+      // Create a clean blob with proper MIME type
+      const cleanBlob = new Blob([blob], { 
+        type: 'application/pdf'
+      });
+      
+      // Create download URL
+      const downloadUrl = URL.createObjectURL(cleanBlob);
+      const fileName = file.name.replace(/\.(ppt|pptx)$/i, '.pdf');
+      
+      // Trigger immediate download
       const link = document.createElement('a');
-      link.href = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKL01lZGlhQm94IFswIDAgNTk1IDg0Ml0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovQ29udGVudHMgNCAwIFIKL1Jlc291cmNlcyA8PAovRm9udCA8PAovRjEgNSAwIFIKPj4KPj4KL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKFBvd2VyUG9pbnQgdG8gUERGKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKFBvd2VyUG9pbnQgdG8gUERGKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjEgMCBvYmoKPDwKZW5kb2JqCnhwcmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTAwIDAwMDAwIG4gCjAwMDAwMDAwNzkgMDAwMDAgbiAKMDAwMDAwMDE3MyAwMDAwMCBuIAowMDAwMDAwMzAxIDAwMDAwIG4gCjAwMDAwMDAzODAgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA2Ci9Sb290IDEgMCBSCi9JbmZvIDYgMCBSCj4+CnN0YXJ0eHJlZgo0OTIKJSVFT0Y=';
-      link.download = 'converted-presentation.pdf';
+      link.href = downloadUrl;
+      link.download = fileName;
+      link.style.display = 'none';
+      link.setAttribute('download', fileName);
+      link.setAttribute('rel', 'noopener noreferrer');
+      
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      alert('PowerPoint presentation converted to PDF successfully! Download started.');
-    }, 2000);
+      
+      // Clean up URL
+      URL.revokeObjectURL(downloadUrl);
+      
+      // Set success modal data for confirmation
+      setProcessedFileInfo({
+        fileName,
+        fileSize: cleanBlob.size,
+        downloadUrl: ''
+      });
+      
+      // Show success modal
+      setShowSuccessModal(true);
+      
+    } catch (error) {
+      console.error('Error converting PowerPoint to PDF:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      alert(`Failed to convert PowerPoint to PDF: ${errorMessage}. Please try again.`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -71,7 +137,7 @@ export default function PowerPointToPDFPage() {
           </Link>
           <h1 className="text-4xl font-bold text-gray-900 mb-4">PowerPoint to PDF</h1>
           <p className="text-lg text-gray-600">
-            Convert your PowerPoint presentations to PDF format. Preserve all slides and formatting.
+            Convert your PowerPoint presentations to PDF format. Maintain slide layout and formatting.
           </p>
         </div>
 
@@ -87,48 +153,50 @@ export default function PowerPointToPDFPage() {
           onDrop={handleDrop}
         >
           <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-2xl">📊</span>
+            <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+            </svg>
           </div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">
-            {isDragOver ? 'Drop your PowerPoint file here' : 'Choose PowerPoint file or drag it here'}
-          </h3>
-          <p className="text-gray-600 mb-4">
-            Select a PowerPoint presentation (.ppt or .pptx) to convert to PDF
-          </p>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
-          >
-            Choose File
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
-            className="hidden"
-          />
-        </div>
-
-        {/* File Info */}
-        {file && (
-          <div className="mt-8 bg-white rounded-lg shadow-sm border">
-            <div className="p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                File to convert
-              </h3>
-              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                <span className="text-lg">📊</span>
-                <div>
+          
+          {file ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-center gap-3">
+                <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div className="text-left">
                   <p className="font-medium text-gray-900">{file.name}</p>
-                  <p className="text-sm text-gray-500">
-                    {(file.size / 1024 / 1024).toFixed(2)} MB
-                  </p>
+                  <p className="text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                 </div>
               </div>
+              
+              <button
+                onClick={() => setFile(null)}
+                className="text-red-600 hover:text-red-700 text-sm font-medium"
+              >
+                Remove file
+              </button>
             </div>
-          </div>
-        )}
+          ) : (
+            <div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Upload PowerPoint file</h3>
+              <p className="text-gray-600 mb-4">Drag and drop your PowerPoint file here, or click to browse</p>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+              >
+                Choose File
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".ppt,.pptx"
+                onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
+                className="hidden"
+              />
+            </div>
+          )}
+        </div>
 
         {/* Convert Button */}
         {file && (
@@ -177,7 +245,43 @@ export default function PowerPointToPDFPage() {
             </div>
           </div>
         </div>
+
+        {/* Features */}
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-white rounded-lg p-6 border">
+            <h4 className="font-semibold text-gray-900 mb-2">Supported Formats</h4>
+            <ul className="text-sm text-gray-600 space-y-1">
+              <li>• PowerPoint (.pptx)</li>
+              <li>• PowerPoint 97-2003 (.ppt)</li>
+              <li>• All slide layouts preserved</li>
+            </ul>
+          </div>
+          <div className="bg-white rounded-lg p-6 border">
+            <h4 className="font-semibold text-gray-900 mb-2">Conversion Features</h4>
+            <ul className="text-sm text-gray-600 space-y-1">
+              <li>• Maintains slide formatting</li>
+              <li>• Preserves images and graphics</li>
+              <li>• High-quality output</li>
+            </ul>
+          </div>
+        </div>
       </div>
+
+      {/* Success Modal */}
+      {processedFileInfo && (
+        <SuccessModal
+          isOpen={showSuccessModal}
+          onClose={() => {
+            setShowSuccessModal(false);
+            setProcessedFileInfo(null);
+          }}
+          title="PowerPoint to PDF Conversion Complete!"
+          message="Your PowerPoint presentation has been successfully converted to PDF format."
+          fileName={processedFileInfo.fileName}
+          fileSize={processedFileInfo.fileSize}
+          downloadUrl={processedFileInfo.downloadUrl}
+        />
+      )}
     </div>
   );
 }

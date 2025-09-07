@@ -2,25 +2,28 @@
 
 import { useState, useRef } from 'react';
 import Link from 'next/link';
+import SuccessModal from '@/components/success-modal';
 
 export default function JPGToPDFPage() {
-  const [files, setFiles] = useState<File[]>([]);
+  const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [conversionOptions, setConversionOptions] = useState({
-    orientation: 'portrait',
-    margin: 'normal',
-    pageSize: 'a4',
-    quality: 'high'
-  });
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [processedFileInfo, setProcessedFileInfo] = useState<{
+    fileName: string;
+    fileSize: number;
+    downloadUrl: string;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileSelect = (selectedFiles: FileList | null) => {
-    if (selectedFiles) {
-      const imageFiles = Array.from(selectedFiles).filter(file => 
-        file.type.startsWith('image/')
-      );
-      setFiles(prev => [...prev, ...imageFiles]);
+  const handleFileSelect = (selectedFile: File | null) => {
+    if (selectedFile && (selectedFile.type === 'image/jpeg' || 
+                        selectedFile.type === 'image/jpg' ||
+                        selectedFile.name.endsWith('.jpg') ||
+                        selectedFile.name.endsWith('.jpeg'))) {
+      setFile(selectedFile);
+    } else {
+      alert('Please select a valid JPG image file (.jpg or .jpeg)');
     }
   };
 
@@ -37,41 +40,85 @@ export default function JPGToPDFPage() {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    handleFileSelect(e.dataTransfer.files);
-  };
-
-  const removeFile = (index: number) => {
-    setFiles(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const moveFile = (fromIndex: number, toIndex: number) => {
-    if (toIndex < 0 || toIndex >= files.length) return;
-    
-    const newFiles = [...files];
-    const [movedFile] = newFiles.splice(fromIndex, 1);
-    newFiles.splice(toIndex, 0, movedFile);
-    setFiles(newFiles);
+    const droppedFile = e.dataTransfer.files[0];
+    handleFileSelect(droppedFile);
   };
 
   const handleConvert = async () => {
-    if (files.length === 0) return;
+    if (!file) {
+      alert('Please select a JPG image to convert.');
+      return;
+    }
     
     setIsProcessing(true);
     
-    // Simulate processing
-    setTimeout(() => {
-      setIsProcessing(false);
+    try {
+      console.log('Starting JPG to PDF conversion with file:', { name: file.name, size: file.size });
       
-      // Create a download link for the converted PDF
+      // Use the convert API endpoint
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('operation', 'jpg-to-pdf');
+
+      const response = await fetch('/api/pdf/convert', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('API Error:', errorData);
+        throw new Error(errorData.error || 'Failed to convert JPG to PDF');
+      }
+
+      const blob = await response.blob();
+      console.log('Conversion successful, blob size:', blob.size);
+      
+      if (blob.size === 0) {
+        throw new Error('Generated PDF is empty');
+      }
+      
+      // Create a clean blob with proper MIME type
+      const cleanBlob = new Blob([blob], { 
+        type: 'application/pdf'
+      });
+      
+      // Create download URL
+      const downloadUrl = URL.createObjectURL(cleanBlob);
+      const fileName = file.name.replace(/\.(jpg|jpeg)$/i, '.pdf');
+      
+      // Trigger immediate download
       const link = document.createElement('a');
-      link.href = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKL01lZGlhQm94IFswIDAgNTk1IDg0Ml0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovQ29udGVudHMgNCAwIFIKL1Jlc291cmNlcyA8PAovRm9udCA8PAovRjEgNSAwIFIKPj4KPj4KL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKEltYWdlcyBjb252ZXJ0ZWQgdG8gUERGKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKEltYWdlcyBjb252ZXJ0ZWQgdG8gUERGKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwKL1R5cGUgL0ZvbnQKL1N1YnR5cGUgL1R5cGUxCi9CYXNlRm9udCAvSGVsdmV0aWNhCi9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nCj4+CmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTAwIDAwMDAwIG4gCjAwMDAwMDAwNzkgMDAwMDAgbiAKMDAwMDAwMDE3MyAwMDAwMCBuIAowMDAwMDAwMzAxIDAwMDAwIG4gCjAwMDAwMDAzODAgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA2Ci9Sb290IDEgMCBSCi9JbmZvIDYgMCBSCj4+CnN0YXJ0eHJlZgo0OTIKJSVFT0Y=';
-      link.download = 'converted-images.pdf';
+      link.href = downloadUrl;
+      link.download = fileName;
+      link.style.display = 'none';
+      link.setAttribute('download', fileName);
+      link.setAttribute('rel', 'noopener noreferrer');
+      
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       
-      alert('Images converted to PDF successfully! Download started.');
-    }, 3000);
+      // Clean up URL
+      URL.revokeObjectURL(downloadUrl);
+      
+      // Set success modal data for confirmation
+      setProcessedFileInfo({
+        fileName,
+        fileSize: cleanBlob.size,
+        downloadUrl: ''
+      });
+      
+      // Show success modal
+      setShowSuccessModal(true);
+      
+    } catch (error) {
+      console.error('Error converting JPG to PDF:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      alert(`Failed to convert JPG to PDF: ${errorMessage}. Please try again.`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -90,7 +137,7 @@ export default function JPGToPDFPage() {
           </Link>
           <h1 className="text-4xl font-bold text-gray-900 mb-4">JPG to PDF</h1>
           <p className="text-lg text-gray-600">
-            Convert JPG images to PDF in seconds. Easily adjust orientation and margins.
+            Convert your JPG images to PDF format. Perfect for creating documents from photos.
           </p>
         </div>
 
@@ -105,156 +152,59 @@ export default function JPGToPDFPage() {
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          <div className="w-16 h-16 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-2xl">🖼️</span>
+          <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
           </div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">
-            {isDragOver ? 'Drop your images here' : 'Choose image files or drag them here'}
-          </h3>
-          <p className="text-gray-600 mb-4">
-            Select JPG, PNG, or other image files to convert to PDF
-          </p>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="bg-pink-600 hover:bg-pink-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
-          >
-            Choose Files
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept="image/*"
-            onChange={(e) => handleFileSelect(e.target.files)}
-            className="hidden"
-          />
+          
+          {file ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-center gap-3">
+                <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div className="text-left">
+                  <p className="font-medium text-gray-900">{file.name}</p>
+                  <p className="text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
+              </div>
+              
+              <button
+                onClick={() => setFile(null)}
+                className="text-red-600 hover:text-red-700 text-sm font-medium"
+              >
+                Remove file
+              </button>
+            </div>
+          ) : (
+            <div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Upload JPG image</h3>
+              <p className="text-gray-600 mb-4">Drag and drop your JPG image here, or click to browse</p>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+              >
+                Choose File
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".jpg,.jpeg"
+                onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
+                className="hidden"
+              />
+            </div>
+          )}
         </div>
 
-        {/* Conversion Options */}
-        {files.length > 0 && (
-          <div className="mt-8 bg-white rounded-lg shadow-sm border p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Conversion Options</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Page Orientation</label>
-                <select
-                  value={conversionOptions.orientation}
-                  onChange={(e) => setConversionOptions(prev => ({ ...prev, orientation: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                >
-                  <option value="portrait">Portrait</option>
-                  <option value="landscape">Landscape</option>
-                  <option value="auto">Auto (based on image)</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Page Size</label>
-                <select
-                  value={conversionOptions.pageSize}
-                  onChange={(e) => setConversionOptions(prev => ({ ...prev, pageSize: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                >
-                  <option value="a4">A4</option>
-                  <option value="letter">Letter</option>
-                  <option value="a3">A3</option>
-                  <option value="legal">Legal</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Margins</label>
-                <select
-                  value={conversionOptions.margin}
-                  onChange={(e) => setConversionOptions(prev => ({ ...prev, margin: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                >
-                  <option value="none">No margins</option>
-                  <option value="small">Small</option>
-                  <option value="normal">Normal</option>
-                  <option value="large">Large</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Quality</label>
-                <select
-                  value={conversionOptions.quality}
-                  onChange={(e) => setConversionOptions(prev => ({ ...prev, quality: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                >
-                  <option value="low">Low (smaller file)</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High (better quality)</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* File List */}
-        {files.length > 0 && (
-          <div className="mt-8 bg-white rounded-lg shadow-sm border">
-            <div className="p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Images to convert ({files.length})
-              </h3>
-              <div className="space-y-3">
-                {files.map((file, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <span className="text-lg">🖼️</span>
-                      <div>
-                        <p className="font-medium text-gray-900">{file.name}</p>
-                        <p className="text-sm text-gray-500">
-                          {(file.size / 1024 / 1024).toFixed(2)} MB
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {index > 0 && (
-                        <button
-                          onClick={() => moveFile(index, index - 1)}
-                          className="p-1 text-gray-400 hover:text-gray-600"
-                          title="Move up"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                          </svg>
-                        </button>
-                      )}
-                      {index < files.length - 1 && (
-                        <button
-                          onClick={() => moveFile(index, index + 1)}
-                          className="p-1 text-gray-400 hover:text-gray-600"
-                          title="Move down"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-                      )}
-                      <button
-                        onClick={() => removeFile(index)}
-                        className="p-1 text-red-400 hover:text-red-600"
-                        title="Remove file"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Convert Button */}
-        {files.length > 0 && (
+        {file && (
           <div className="mt-8 text-center">
             <button
               onClick={handleConvert}
               disabled={isProcessing}
-              className="bg-pink-600 hover:bg-pink-700 disabled:bg-gray-400 text-white px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
             >
               {isProcessing ? (
                 <div className="flex items-center gap-2">
@@ -269,33 +219,69 @@ export default function JPGToPDFPage() {
         )}
 
         {/* Instructions */}
-        <div className="mt-12 bg-pink-50 rounded-lg p-6">
+        <div className="mt-12 bg-blue-50 rounded-lg p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">How to convert JPG to PDF</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="text-center">
-              <div className="w-12 h-12 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <span className="text-xl">1</span>
               </div>
-              <h4 className="font-medium text-gray-900 mb-2">Upload images</h4>
-              <p className="text-sm text-gray-600">Select JPG, PNG, or other image files</p>
+              <h4 className="font-medium text-gray-900 mb-2">Upload JPG image</h4>
+              <p className="text-sm text-gray-600">Select a JPG image from your device</p>
             </div>
             <div className="text-center">
-              <div className="w-12 h-12 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <span className="text-xl">2</span>
               </div>
-              <h4 className="font-medium text-gray-900 mb-2">Choose options</h4>
-              <p className="text-sm text-gray-600">Set orientation, page size, and margins</p>
+              <h4 className="font-medium text-gray-900 mb-2">Convert to PDF</h4>
+              <p className="text-sm text-gray-600">Click convert and wait for processing</p>
             </div>
             <div className="text-center">
-              <div className="w-12 h-12 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <span className="text-xl">3</span>
               </div>
-              <h4 className="font-medium text-gray-900 mb-2">Download PDF</h4>
-              <p className="text-sm text-gray-600">Get your converted PDF document</p>
+              <h4 className="font-medium text-gray-900 mb-2">Download result</h4>
+              <p className="text-sm text-gray-600">Download your converted PDF document</p>
             </div>
           </div>
         </div>
+
+        {/* Features */}
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-white rounded-lg p-6 border">
+            <h4 className="font-semibold text-gray-900 mb-2">Supported Formats</h4>
+            <ul className="text-sm text-gray-600 space-y-1">
+              <li>• JPEG (.jpg)</li>
+              <li>• JPEG (.jpeg)</li>
+              <li>• High-quality conversion</li>
+            </ul>
+          </div>
+          <div className="bg-white rounded-lg p-6 border">
+            <h4 className="font-semibold text-gray-900 mb-2">Conversion Features</h4>
+            <ul className="text-sm text-gray-600 space-y-1">
+              <li>• Maintains image quality</li>
+              <li>• Preserves original dimensions</li>
+              <li>• Fast processing</li>
+            </ul>
+          </div>
+        </div>
       </div>
+
+      {/* Success Modal */}
+      {processedFileInfo && (
+        <SuccessModal
+          isOpen={showSuccessModal}
+          onClose={() => {
+            setShowSuccessModal(false);
+            setProcessedFileInfo(null);
+          }}
+          title="JPG to PDF Conversion Complete!"
+          message="Your JPG image has been successfully converted to PDF format."
+          fileName={processedFileInfo.fileName}
+          fileSize={processedFileInfo.fileSize}
+          downloadUrl={processedFileInfo.downloadUrl}
+        />
+      )}
     </div>
   );
 }

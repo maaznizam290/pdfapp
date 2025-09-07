@@ -2,11 +2,18 @@
 
 import { useState, useRef } from 'react';
 import Link from 'next/link';
+import SuccessModal from '@/components/success-modal';
 
 export default function WordToPDFPage() {
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [processedFileInfo, setProcessedFileInfo] = useState<{
+    fileName: string;
+    fileSize: number;
+    downloadUrl: string;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (selectedFile: File | null) => {
@@ -36,23 +43,80 @@ export default function WordToPDFPage() {
   };
 
   const handleConvert = async () => {
-    if (!file) return;
+    if (!file) {
+      alert('Please select a Word document to convert.');
+      return;
+    }
     
     setIsProcessing(true);
     
-    // Simulate processing
-    setTimeout(() => {
-      setIsProcessing(false);
-      // Here you would implement actual Word to PDF conversion logic
-      // Create a download link for the converted PDF
+    try {
+      console.log('Starting Word to PDF conversion with file:', { name: file.name, size: file.size });
+      
+      // Use the convert API endpoint
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('operation', 'word-to-pdf');
+
+      const response = await fetch('/api/pdf/convert', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('API Error:', errorData);
+        throw new Error(errorData.error || 'Failed to convert Word to PDF');
+      }
+
+      const blob = await response.blob();
+      console.log('Conversion successful, blob size:', blob.size);
+      
+      if (blob.size === 0) {
+        throw new Error('Generated PDF is empty');
+      }
+      
+      // Create a clean blob with proper MIME type
+      const cleanBlob = new Blob([blob], { 
+        type: 'application/pdf'
+      });
+      
+      // Create download URL
+      const downloadUrl = URL.createObjectURL(cleanBlob);
+      const fileName = file.name.replace(/\.(doc|docx)$/i, '.pdf');
+      
+      // Trigger immediate download
       const link = document.createElement('a');
-      link.href = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKL01lZGlhQm94IFswIDAgNTk1IDg0Ml0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovQ29udGVudHMgNCAwIFIKL1Jlc291cmNlcyA8PAovRm9udCA8PAovRjEgNSAwIFIKPj4KPj4KL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKFdvcmQgdG8gUERGKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKFdvcmQgdG8gUERGKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjEgMCBvYmoKPDwKZW5kb2JqCnhwcmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTAwIDAwMDAwIG4gCjAwMDAwMDAwNzkgMDAwMDAgbiAKMDAwMDAwMDE3MyAwMDAwMCBuIAowMDAwMDAwMzAxIDAwMDAwIG4gCjAwMDAwMDAzODAgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA2Ci9Sb290IDEgMCBSCi9JbmZvIDYgMCBSCj4+CnN0YXJ0eHJlZgo0OTIKJSVFT0Y=';
-      link.download = 'converted-document.pdf';
+      link.href = downloadUrl;
+      link.download = fileName;
+      link.style.display = 'none';
+      link.setAttribute('download', fileName);
+      link.setAttribute('rel', 'noopener noreferrer');
+      
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      alert('Word document converted to PDF successfully! Download started.');
-    }, 2000);
+      
+      // Clean up URL
+      URL.revokeObjectURL(downloadUrl);
+      
+      // Set success modal data for confirmation
+      setProcessedFileInfo({
+        fileName,
+        fileSize: cleanBlob.size,
+        downloadUrl: ''
+      });
+      
+      // Show success modal
+      setShowSuccessModal(true);
+      
+    } catch (error) {
+      console.error('Error converting Word to PDF:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      alert(`Failed to convert Word to PDF: ${errorMessage}. Please try again.`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -178,6 +242,22 @@ export default function WordToPDFPage() {
           </div>
         </div>
       </div>
+
+      {/* Success Modal */}
+      {processedFileInfo && (
+        <SuccessModal
+          isOpen={showSuccessModal}
+          onClose={() => {
+            setShowSuccessModal(false);
+            setProcessedFileInfo(null);
+          }}
+          title="Word to PDF Conversion Complete!"
+          message="Your Word document has been successfully converted to PDF format."
+          fileName={processedFileInfo.fileName}
+          fileSize={processedFileInfo.fileSize}
+          downloadUrl={processedFileInfo.downloadUrl}
+        />
+      )}
     </div>
   );
 }

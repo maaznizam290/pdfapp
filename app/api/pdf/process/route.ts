@@ -108,13 +108,60 @@ export async function POST(request: NextRequest) {
         case 'page-numbers':
           resultBuffer = await addPageNumbers(inputPath, options);
           break;
+        case 'crop':
+          resultBuffer = await cropPDF(inputPath, options);
+          break;
+        case 'organize':
+          resultBuffer = await organizePDF(inputPath, options);
+          break;
         default:
           throw new Error(`Unsupported operation: ${operation}`);
       }
 
-      // Generate a secure filename
+      // Generate a secure filename based on operation
       const timestamp = new Date().toISOString().slice(0, 10);
-      const secureFilename = `merged-document-${timestamp}.pdf`;
+      let secureFilename = `processed-document-${timestamp}.pdf`;
+      
+      switch (operation) {
+        case 'merge':
+          secureFilename = `merged-document-${timestamp}.pdf`;
+          break;
+        case 'split':
+          secureFilename = `split-document-${timestamp}.pdf`;
+          break;
+        case 'compress':
+          secureFilename = `compressed-document-${timestamp}.pdf`;
+          break;
+        case 'extract-pages':
+          secureFilename = `extracted-pages-${timestamp}.pdf`;
+          break;
+        case 'remove-pages':
+          secureFilename = `pages-removed-${timestamp}.pdf`;
+          break;
+        case 'organize':
+          secureFilename = `organized-document-${timestamp}.pdf`;
+          break;
+        case 'crop':
+          secureFilename = `cropped-document-${timestamp}.pdf`;
+          break;
+        case 'watermark':
+          secureFilename = `watermarked-document-${timestamp}.pdf`;
+          break;
+        case 'rotate':
+          secureFilename = `rotated-document-${timestamp}.pdf`;
+          break;
+        case 'protect':
+          secureFilename = `protected-document-${timestamp}.pdf`;
+          break;
+        case 'unlock':
+          secureFilename = `unlocked-document-${timestamp}.pdf`;
+          break;
+        case 'page-numbers':
+          secureFilename = `numbered-document-${timestamp}.pdf`;
+          break;
+        default:
+          secureFilename = `processed-document-${timestamp}.pdf`;
+      }
       
       // Return the processed file with secure headers
       return new NextResponse(resultBuffer, {
@@ -269,21 +316,74 @@ async function mergePDFs(formData: FormData): Promise<Buffer> {
 }
 
 async function splitPDF(inputPath: string, options: any): Promise<Buffer> {
-  const pdfBytes = await readFile(inputPath);
-  const pdf = await PDFDocument.load(pdfBytes);
-  const newPdf = await PDFDocument.create();
+  try {
+    const pdfBytes = await readFile(inputPath);
+    const pdf = await PDFDocument.load(pdfBytes);
+    const newPdf = await PDFDocument.create();
 
-  const { pageRange } = options;
-  const startPage = pageRange.start - 1; // Convert to 0-based index
-  const endPage = pageRange.end - 1;
+    // Set document metadata
+    newPdf.setTitle('Split PDF Document');
+    newPdf.setAuthor('PDF Tools');
+    newPdf.setSubject('PDF Split');
+    newPdf.setProducer('PDF Tools - PDF Splitter');
 
-  for (let i = startPage; i <= endPage && i < pdf.getPageCount(); i++) {
-    const [page] = await newPdf.copyPages(pdf, [i]);
-    newPdf.addPage(page);
+    const { pageRange, everyPages } = options;
+    const totalPages = pdf.getPageCount();
+    
+    let pagesToInclude: number[] = [];
+
+    if (pageRange) {
+      // Split by page range
+      const startPage = Math.max(1, pageRange.start);
+      const endPage = Math.min(totalPages, pageRange.end);
+      
+      if (startPage > endPage) {
+        throw new Error('Start page cannot be greater than end page');
+      }
+      
+      pagesToInclude = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i - 1);
+    } else if (everyPages) {
+      // Split every N pages
+      const everyN = Math.max(1, everyPages);
+      pagesToInclude = Array.from({ length: totalPages }, (_, i) => i).filter(i => i % everyN === 0);
+    } else {
+      // Default: split all pages
+      pagesToInclude = Array.from({ length: totalPages }, (_, i) => i);
+    }
+
+    if (pagesToInclude.length === 0) {
+      throw new Error('No pages to include in split');
+    }
+
+    // Validate page indices
+    const validPages = pagesToInclude.filter(pageIndex => pageIndex >= 0 && pageIndex < totalPages);
+    
+    if (validPages.length === 0) {
+      throw new Error('No valid pages found for splitting');
+    }
+
+    const copiedPages = await newPdf.copyPages(pdf, validPages);
+    copiedPages.forEach((page) => {
+      newPdf.addPage(page);
+    });
+
+    // Save with proper options to ensure compatibility
+    const pdfBytesResult = await newPdf.save({
+      useObjectStreams: false, // Disable object streams for better compatibility
+      addDefaultPage: false,   // Don't add default page
+      objectsPerTick: 50,       // Process objects in batches
+    });
+
+    // Validate the generated PDF
+    if (pdfBytesResult.length === 0) {
+      throw new Error('Generated PDF is empty');
+    }
+
+    return Buffer.from(pdfBytesResult);
+  } catch (error) {
+    console.error('Error in splitPDF:', error);
+    throw new Error(`Failed to split PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
-
-  const pdfBytesResult = await newPdf.save();
-  return Buffer.from(pdfBytesResult);
 }
 
 async function compressPDF(inputPath: string, options: any): Promise<Buffer> {
@@ -303,39 +403,111 @@ async function compressPDF(inputPath: string, options: any): Promise<Buffer> {
 }
 
 async function extractPages(inputPath: string, options: any): Promise<Buffer> {
-  const pdfBytes = await readFile(inputPath);
-  const pdf = await PDFDocument.load(pdfBytes);
-  const newPdf = await PDFDocument.create();
+  try {
+    const pdfBytes = await readFile(inputPath);
+    const pdf = await PDFDocument.load(pdfBytes);
+    const newPdf = await PDFDocument.create();
 
-  const { pages } = options;
-  const pageIndices = pages.map((page: number) => page - 1); // Convert to 0-based
+    // Set document metadata
+    newPdf.setTitle('Extracted Pages from PDF');
+    newPdf.setAuthor('PDF Tools');
+    newPdf.setSubject('PDF Page Extraction');
+    newPdf.setProducer('PDF Tools - Page Extractor');
 
-  const extractedPages = await newPdf.copyPages(pdf, pageIndices);
-  extractedPages.forEach((page) => newPdf.addPage(page));
+    const { pages } = options;
+    
+    // Validate page numbers
+    const totalPages = pdf.getPageCount();
+    const validPages = pages.filter((page: number) => page >= 1 && page <= totalPages);
+    
+    if (validPages.length === 0) {
+      throw new Error('No valid pages specified for extraction');
+    }
 
-  const pdfBytesResult = await newPdf.save();
-  return Buffer.from(pdfBytesResult);
+    const pageIndices = validPages.map((page: number) => page - 1); // Convert to 0-based
+
+    const extractedPages = await newPdf.copyPages(pdf, pageIndices);
+    extractedPages.forEach((page) => {
+      // Ensure page is properly formatted
+      newPdf.addPage(page);
+    });
+
+    // Save with proper options to ensure compatibility
+    const pdfBytesResult = await newPdf.save({
+      useObjectStreams: false, // Disable object streams for better compatibility
+      addDefaultPage: false,   // Don't add default page
+      objectsPerTick: 50,       // Process objects in batches
+    });
+
+    // Validate the generated PDF
+    if (pdfBytesResult.length === 0) {
+      throw new Error('Generated PDF is empty');
+    }
+
+    return Buffer.from(pdfBytesResult);
+  } catch (error) {
+    console.error('Error in extractPages:', error);
+    throw new Error(`Failed to extract pages: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 async function removePages(inputPath: string, options: any): Promise<Buffer> {
-  const pdfBytes = await readFile(inputPath);
-  const pdf = await PDFDocument.load(pdfBytes);
-  const newPdf = await PDFDocument.create();
+  try {
+    const pdfBytes = await readFile(inputPath);
+    const pdf = await PDFDocument.load(pdfBytes);
+    const newPdf = await PDFDocument.create();
 
-  const { pagesToRemove } = options;
-  const pagesToKeep = [];
-  
-  for (let i = 0; i < pdf.getPageCount(); i++) {
-    if (!pagesToRemove.includes(i + 1)) { // Convert to 1-based for comparison
-      pagesToKeep.push(i);
+    // Set document metadata
+    newPdf.setTitle('Pages Removed from PDF');
+    newPdf.setAuthor('PDF Tools');
+    newPdf.setSubject('PDF Page Removal');
+    newPdf.setProducer('PDF Tools - Page Remover');
+
+    const { pagesToRemove } = options;
+    const totalPages = pdf.getPageCount();
+    
+    // Validate pages to remove
+    const validPagesToRemove = pagesToRemove.filter((page: number) => page >= 1 && page <= totalPages);
+    
+    if (validPagesToRemove.length === totalPages) {
+      throw new Error('Cannot remove all pages from PDF');
     }
+
+    const pagesToKeep = [];
+    
+    for (let i = 0; i < totalPages; i++) {
+      if (!validPagesToRemove.includes(i + 1)) { // Convert to 1-based for comparison
+        pagesToKeep.push(i);
+      }
+    }
+
+    if (pagesToKeep.length === 0) {
+      throw new Error('No pages remaining after removal');
+    }
+
+    const keptPages = await newPdf.copyPages(pdf, pagesToKeep);
+    keptPages.forEach((page) => {
+      // Ensure page is properly formatted
+      newPdf.addPage(page);
+    });
+
+    // Save with proper options to ensure compatibility
+    const pdfBytesResult = await newPdf.save({
+      useObjectStreams: false, // Disable object streams for better compatibility
+      addDefaultPage: false,   // Don't add default page
+      objectsPerTick: 50,       // Process objects in batches
+    });
+
+    // Validate the generated PDF
+    if (pdfBytesResult.length === 0) {
+      throw new Error('Generated PDF is empty');
+    }
+
+    return Buffer.from(pdfBytesResult);
+  } catch (error) {
+    console.error('Error in removePages:', error);
+    throw new Error(`Failed to remove pages: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
-
-  const keptPages = await newPdf.copyPages(pdf, pagesToKeep);
-  keptPages.forEach((page) => newPdf.addPage(page));
-
-  const pdfBytesResult = await newPdf.save();
-  return Buffer.from(pdfBytesResult);
 }
 
 async function rotatePDF(inputPath: string, options: any): Promise<Buffer> {
@@ -357,6 +529,58 @@ async function rotatePDF(inputPath: string, options: any): Promise<Buffer> {
 
   const pdfBytesResult = await newPdf.save();
   return Buffer.from(pdfBytesResult);
+}
+
+async function organizePDF(inputPath: string, options: any): Promise<Buffer> {
+  try {
+    const pdfBytes = await readFile(inputPath);
+    const pdf = await PDFDocument.load(pdfBytes);
+    const newPdf = await PDFDocument.create();
+
+    // Set document metadata
+    newPdf.setTitle('Organized PDF Document');
+    newPdf.setAuthor('PDF Tools');
+    newPdf.setSubject('PDF Organization');
+    newPdf.setProducer('PDF Tools - PDF Organizer');
+
+    const { pageOrder } = options;
+    const totalPages = pdf.getPageCount();
+    
+    // If no specific page order is provided, use original order
+    const pagesToOrganize = pageOrder || Array.from({ length: totalPages }, (_, i) => i + 1);
+    
+    // Validate page numbers
+    const validPages = pagesToOrganize.filter((page: number) => page >= 1 && page <= totalPages);
+    
+    if (validPages.length === 0) {
+      throw new Error('No valid pages specified for organization');
+    }
+
+    const pageIndices = validPages.map((page: number) => page - 1); // Convert to 0-based
+
+    const organizedPages = await newPdf.copyPages(pdf, pageIndices);
+    organizedPages.forEach((page) => {
+      // Ensure page is properly formatted
+      newPdf.addPage(page);
+    });
+
+    // Save with proper options to ensure compatibility
+    const pdfBytesResult = await newPdf.save({
+      useObjectStreams: false, // Disable object streams for better compatibility
+      addDefaultPage: false,   // Don't add default page
+      objectsPerTick: 50,       // Process objects in batches
+    });
+
+    // Validate the generated PDF
+    if (pdfBytesResult.length === 0) {
+      throw new Error('Generated PDF is empty');
+    }
+
+    return Buffer.from(pdfBytesResult);
+  } catch (error) {
+    console.error('Error in organizePDF:', error);
+    throw new Error(`Failed to organize PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 async function protectPDF(inputPath: string, options: any): Promise<Buffer> {
@@ -461,6 +685,54 @@ async function addPageNumbers(inputPath: string, options: any): Promise<Buffer> 
       y,
       size: fontSize || 12,
     });
+  });
+
+  const pdfBytesResult = await newPdf.save();
+  return Buffer.from(pdfBytesResult);
+}
+
+async function cropPDF(inputPath: string, options: any): Promise<Buffer> {
+  const pdfBytes = await readFile(inputPath);
+  const pdf = await PDFDocument.load(pdfBytes);
+  const newPdf = await PDFDocument.create();
+
+  const { crop } = options;
+  const { top, right, bottom, left, unit } = crop;
+
+  // Convert units to points (PDF uses points as base unit)
+  const convertToPoints = (value: number, unit: string): number => {
+    switch (unit) {
+      case 'mm': return value * 2.834645669; // 1 mm = 2.834645669 points
+      case 'in': return value * 72; // 1 inch = 72 points
+      case 'pt': return value; // Already in points
+      default: return value;
+    }
+  };
+
+  const topPoints = convertToPoints(top, unit);
+  const rightPoints = convertToPoints(right, unit);
+  const bottomPoints = convertToPoints(bottom, unit);
+  const leftPoints = convertToPoints(left, unit);
+
+  const copiedPages = await newPdf.copyPages(pdf, pdf.getPageIndices());
+  
+  copiedPages.forEach((page) => {
+    const { width, height } = page.getSize();
+    
+    // Calculate new page dimensions after cropping
+    const newWidth = width - leftPoints - rightPoints;
+    const newHeight = height - topPoints - bottomPoints;
+    
+    // Ensure dimensions are positive
+    if (newWidth > 0 && newHeight > 0) {
+      // Set new page size
+      page.setSize(newWidth, newHeight);
+      
+      // Adjust content position to account for cropping
+      page.translateContent(-leftPoints, -bottomPoints);
+    }
+    
+    newPdf.addPage(page);
   });
 
   const pdfBytesResult = await newPdf.save();

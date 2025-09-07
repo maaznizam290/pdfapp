@@ -37,23 +37,59 @@ export default function PDFToWordPage() {
   };
 
   const handleConvert = async () => {
-    if (!file) return;
+    if (!file) {
+      alert('Please select a PDF file to convert.');
+      return;
+    }
     
     setIsProcessing(true);
     
-    // Simulate processing
-    setTimeout(() => {
-      setIsProcessing(false);
-      // Here you would implement actual PDF to Word conversion logic
-      // Create a download link for the converted Word document
+    try {
+      console.log('Starting PDF to Word conversion with file:', { name: file.name, size: file.size });
+      
+      const blob = await convertFile(file, 'pdf-to-word');
+      console.log('Conversion successful, blob size:', blob.size);
+      
+      if (blob.size === 0) {
+        throw new Error('Generated Word document is empty');
+      }
+      
+      // Create download URL
+      const downloadUrl = URL.createObjectURL(blob);
+      const fileName = `converted-document-${new Date().toISOString().slice(0, 10)}.docx`;
+      
+      // Trigger immediate download
       const link = document.createElement('a');
-      link.href = 'data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,UEsDBBQAAAAIAAeC2lQAAAAAAAAAAAAAAAAJAAAAeGwvUEsDBBQAAAAIAAeC2lQAAAAAAAAAAAAAAAAKAAAAeGwvX3JlbHMvUEsDBBQAAAAIAAeC2lQAAAAAAAAAAAAAAAALAAAAeGwvX3JlbHMvX3JlbC5yZWxQSwECFAMUAAAACAAHgtpUAAAAAAAAAAAAAAAACQAAAAAAAAAAABAA7QEAAAAAeGwvUEsBAhQDFAAAAAgAB4LaVAAAAAAAAAAAAAAAAAoAAAAAAAAAAAAQAAAAAAAAAAB4bC9fcmVscy9QSwECFAMUAAAACAAHgtpUAAAAAAAAAAAAAAAACwAAAAAAAAAAABAA7QH4bC9fcmVscy9fcmVsLnJlbFBLAQIUABQAAAAIAAeC2lQAAAAAAAAAAAAAAAAJAAAAAAAAAAAAEADtAQAAAAB4bC9QSwUGAAAAAAMAAwD9AAAAAA==';
-      link.download = 'converted-document.docx';
+      link.href = downloadUrl;
+      link.download = fileName;
+      link.style.display = 'none';
+      link.setAttribute('download', fileName);
+      link.setAttribute('rel', 'noopener noreferrer');
+      
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      alert('PDF converted to Word successfully! Download started.');
-    }, 2000);
+      
+      // Clean up URL
+      URL.revokeObjectURL(downloadUrl);
+      
+      // Set success modal data
+      setProcessedFileInfo({
+        fileName,
+        fileSize: blob.size,
+        downloadUrl: ''
+      });
+      
+      // Show success modal
+      setShowSuccessModal(true);
+      
+    } catch (error) {
+      console.error('Error converting PDF to Word:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      alert(`Failed to convert PDF to Word: ${errorMessage}. Please try again.`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (

@@ -44,11 +44,17 @@ export default function SplitPDFPage() {
   };
 
   const handleSplit = async () => {
-    if (!file) return;
+    if (!file) {
+      alert('Please select a PDF file to split.');
+      return;
+    }
     
     setIsProcessing(true);
     
     try {
+      console.log('Starting PDF split with file:', { name: file.name, size: file.size });
+      console.log('Split method:', splitMethod);
+      
       // Parse page range
       let pageRangeOptions = {};
       
@@ -56,22 +62,48 @@ export default function SplitPDFPage() {
         const [start, end] = pageRange.split('-').map(Number);
         if (start && end) {
           pageRangeOptions = { pageRange: { start, end } };
+          console.log('Page range options:', pageRangeOptions);
+        } else {
+          throw new Error('Invalid page range format. Please use format like "1-5"');
         }
-      } else if (splitMethod === 'every') {
+      } else if (splitMethod === 'every' && everyPages) {
         pageRangeOptions = { everyPages };
+        console.log('Every pages options:', pageRangeOptions);
+      } else if (splitMethod === 'every' && !everyPages) {
+        throw new Error('Please specify how many pages to split by');
       }
       
       const blob = await processPDF(file, 'split', pageRangeOptions);
+      console.log('Split successful, blob size:', blob.size);
+      
+      if (blob.size === 0) {
+        throw new Error('Generated PDF is empty');
+      }
       
       // Create download URL
       const downloadUrl = URL.createObjectURL(blob);
       const fileName = `split-document-${new Date().toISOString().slice(0, 10)}.pdf`;
       
+      // Trigger immediate download
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = fileName;
+      link.style.display = 'none';
+      link.setAttribute('download', fileName);
+      link.setAttribute('rel', 'noopener noreferrer');
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up URL
+      URL.revokeObjectURL(downloadUrl);
+      
       // Set success modal data
       setProcessedFileInfo({
         fileName,
         fileSize: blob.size,
-        downloadUrl
+        downloadUrl: ''
       });
       
       // Show success modal
@@ -79,7 +111,8 @@ export default function SplitPDFPage() {
       
     } catch (error) {
       console.error('Error splitting PDF:', error);
-      alert('Failed to split PDF. Please try again.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      alert(`Failed to split PDF: ${errorMessage}. Please try again.`);
     } finally {
       setIsProcessing(false);
     }

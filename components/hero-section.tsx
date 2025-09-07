@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 interface HeroSectionProps {
   onViewAllTools?: () => void;
 }
@@ -32,12 +34,12 @@ export default function HeroSection({ onViewAllTools }: HeroSectionProps) {
             >
               Start Using Tools
             </button>
-            <button 
-              onClick={onViewAllTools}
-              className="border border-gray-300 hover:bg-gray-50 text-gray-700 px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
+            <Link 
+              href="/tools"
+              className="border border-gray-300 hover:bg-gray-50 text-gray-700 px-8 py-4 rounded-lg font-semibold text-lg transition-colors text-center"
             >
               View All Tools
-            </button>
+            </Link>
           </div>
         </div>
       </div>

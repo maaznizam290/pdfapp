@@ -22,10 +22,10 @@ export default function Header() {
               All PDF tools
             </Link>
             <Link
-              href="/business"
+              href="/privacy-policy"
               className="text-gray-700 hover:text-blue-600 font-medium transition-colors"
             >
-              Business
+              Privacy Policy
             </Link>
             <Link
               href="/help"

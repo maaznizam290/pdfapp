@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react';
 import Link from 'next/link';
+import SuccessModal from '@/components/success-modal';
 
 export default function ExtractPagesPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -11,6 +12,12 @@ export default function ExtractPagesPage() {
   const [totalPages, setTotalPages] = useState(0);
   const [extractMode, setExtractMode] = useState<'range' | 'individual'>('individual');
   const [pageRange, setPageRange] = useState({ start: 1, end: 1 });
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [processedFileInfo, setProcessedFileInfo] = useState<{
+    fileName: string;
+    fileSize: number;
+    downloadUrl: string;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (selectedFile: File | null) => {
@@ -60,7 +67,10 @@ export default function ExtractPagesPage() {
   };
 
   const handleExtractPages = async () => {
-    if (!file) return;
+    if (!file) {
+      alert('Please select a PDF file to extract pages from.');
+      return;
+    }
     
     let pagesToExtract: number[] = [];
     if (extractMode === 'range') {
@@ -72,24 +82,82 @@ export default function ExtractPagesPage() {
       pagesToExtract = selectedPages;
     }
     
-    if (pagesToExtract.length === 0) return;
+    if (pagesToExtract.length === 0) {
+      alert('Please select pages to extract.');
+      return;
+    }
     
     setIsProcessing(true);
     
-    // Simulate processing
-    setTimeout(() => {
-      setIsProcessing(false);
+    try {
+      console.log('Starting page extraction with file:', { name: file.name, size: file.size });
+      console.log('Pages to extract:', pagesToExtract);
       
-      // Create a download link for the extracted pages PDF
+      // Use the process API endpoint
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('operation', 'extract-pages');
+      formData.append('options', JSON.stringify({ pages: pagesToExtract }));
+
+      const response = await fetch('/api/pdf/process', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('API Error:', errorData);
+        throw new Error(errorData.error || 'Failed to extract pages');
+      }
+
+      const blob = await response.blob();
+      console.log('Extraction successful, blob size:', blob.size);
+      
+      if (blob.size === 0) {
+        throw new Error('Generated PDF is empty');
+      }
+      
+      // Create a clean blob with proper MIME type
+      const cleanBlob = new Blob([blob], { 
+        type: 'application/pdf'
+      });
+      
+      // Create download URL
+      const downloadUrl = URL.createObjectURL(cleanBlob);
+      const fileName = `extracted-pages-${file.name}`;
+      
+      // Trigger immediate download
       const link = document.createElement('a');
-      link.href = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKL01lZGlhQm94IFswIDAgNTk1IDg0Ml0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovQ29udGVudHMgNCAwIFIKL1Jlc291cmNlcyA8PAovRm9udCA8PAovRjEgNSAwIFIKPj4KPj4KL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKEV4dHJhY3RlZCBQYWdlcykgVGogCkVUCmVuZHN0cmVhbQplbmRvYmoKNCAwIG9iago8PAovTGVuZ3RoIDExCj4+CnN0cmVhbQpCVAoxMjcgNzM3IFRkCi9GMSAxMiBUZgooRXh0cmFjdGVkIFBhZ2VzKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjEgMCBvYmoKPDwKZW5kb2JqCnhwcmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTAwIDAwMDAwIG4gCjAwMDAwMDAwNzkgMDAwMDAgbiAKMDAwMDAwMDE3MyAwMDAwMCBuIAowMDAwMDAwMzAxIDAwMDAwIG4gCjAwMDAwMDAzODAgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA2Ci9Sb290IDEgMCBSCi9JbmZvIDYgMCBSCj4+CnN0YXJ0eHJlZgo0OTIKJSVFT0Y=';
-      link.download = 'extracted-pages.pdf';
+      link.href = downloadUrl;
+      link.download = fileName;
+      link.style.display = 'none';
+      link.setAttribute('download', fileName);
+      link.setAttribute('rel', 'noopener noreferrer');
+      
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       
-      alert(`Pages ${pagesToExtract.join(', ')} extracted successfully! Download started.`);
-    }, 2000);
+      // Clean up URL
+      URL.revokeObjectURL(downloadUrl);
+      
+      // Set success modal data for confirmation
+      setProcessedFileInfo({
+        fileName,
+        fileSize: cleanBlob.size,
+        downloadUrl: ''
+      });
+      
+      // Show success modal
+      setShowSuccessModal(true);
+      
+    } catch (error) {
+      console.error('Error extracting pages:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      alert(`Failed to extract pages: ${errorMessage}. Please try again.`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -324,6 +392,22 @@ export default function ExtractPagesPage() {
           </div>
         </div>
       </div>
+
+      {/* Success Modal */}
+      {processedFileInfo && (
+        <SuccessModal
+          isOpen={showSuccessModal}
+          onClose={() => {
+            setShowSuccessModal(false);
+            setProcessedFileInfo(null);
+          }}
+          title="Page Extraction Complete!"
+          message="The selected pages have been successfully extracted and are ready for download."
+          fileName={processedFileInfo.fileName}
+          fileSize={processedFileInfo.fileSize}
+          downloadUrl={processedFileInfo.downloadUrl}
+        />
+      )}
     </div>
   );
 }
