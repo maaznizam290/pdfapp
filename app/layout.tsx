@@ -42,6 +42,11 @@ const nacelle = localFont({
 export const metadata = {
   title: "PDF Converter - Every tool you need to work with PDFs",
   description: "Free online PDF tools to merge, split, compress, convert, rotate, unlock and watermark PDFs with just a few clicks.",
+  other: {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+  },
 };
 
 export default function RootLayout({

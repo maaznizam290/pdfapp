@@ -2,11 +2,19 @@
 
 import { useState, useRef } from 'react';
 import Link from 'next/link';
+import { processMultipleFiles, downloadFile } from '@/utils/pdfApi';
+import SuccessModal from '@/components/success-modal';
 
 export default function MergePDFPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [processedFileInfo, setProcessedFileInfo] = useState<{
+    fileName: string;
+    fileSize: number;
+    downloadUrl: string;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (selectedFiles: FileList | null) => {
@@ -48,24 +56,83 @@ export default function MergePDFPage() {
   };
 
   const handleMerge = async () => {
-    if (files.length < 2) return;
+    if (files.length < 2) {
+      alert('Please select at least 2 PDF files to merge.');
+      return;
+    }
     
     setIsProcessing(true);
     
-    // Simulate processing
-    setTimeout(() => {
+    try {
+      console.log('Starting merge process with files:', files.map(f => ({ name: f.name, size: f.size })));
+      
+      // Use fetch with proper error handling
+      const formData = new FormData();
+      formData.append('operation', 'merge');
+      
+      files.forEach((file, index) => {
+        console.log(`Adding file ${index + 1}: ${file.name} (${file.size} bytes)`);
+        formData.append('files', file);
+      });
+
+      const response = await fetch('/api/pdf/secure-download', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('API Error:', errorData);
+        throw new Error(errorData.error || 'Failed to merge PDFs');
+      }
+
+      // Get the blob from response
+      const blob = await response.blob();
+      console.log('Merge successful, blob size:', blob.size);
+      
+      if (blob.size === 0) {
+        throw new Error('Generated PDF is empty');
+      }
+      
+      // Create a data URL instead of blob URL for better security
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const dataUrl = e.target?.result as string;
+        const fileName = `merged-document-${new Date().toISOString().slice(0, 10)}.pdf`;
+        
+        // Create download link with data URL
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = fileName;
+        link.style.display = 'none';
+        link.setAttribute('download', fileName);
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+      
+      reader.readAsDataURL(blob);
+      
+      // Set success modal data for confirmation
+      const fileName = `merged-document-${new Date().toISOString().slice(0, 10)}.pdf`;
+      
+      setProcessedFileInfo({
+        fileName,
+        fileSize: blob.size,
+        downloadUrl: '' // No longer needed since we downloaded directly
+      });
+      
+      // Show success modal
+      setShowSuccessModal(true);
+      
+    } catch (error) {
+      console.error('Error merging PDFs:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      alert(`Failed to merge PDFs: ${errorMessage}. Please try again.`);
+    } finally {
       setIsProcessing(false);
-      
-      // Create a download link for the merged PDF
-      const link = document.createElement('a');
-      link.href = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKL01lZGlhQm94IFswIDAgNTk1IDg0Ml0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovQ29udGVudHMgNCAwIFIKL1Jlc291cmNlcyA8PAovRm9udCA8PAovRjEgNSAwIFIKPj4KPj4KL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKE1lcmdlZCBQREYpIFRqCkVUCmVuZHN0cmVhbQplbmRvYmoKNCAwIG9iago8PAovTGVuZ3RoIDExCj4+CnN0cmVhbQpCVAoxMjcgNzM3IFRkCi9GMSAxMiBUZgooTWVyZ2VkIFBERikgVGogCkVUCmVuZHN0cmVhbQplbmRvYmoKMSAwIG9iago8PAplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDEwMCAwMDAwMCBuIAowMDAwMDAwMDc5IDAwMDAwIG4gCjAwMDAwMDAxNzMgMDAwMDAgbiAKMDAwMDAwMDMwMSAwMDAwMCBuIAowMDAwMDAwMzgwIDAwMDAwIG4gCnRyYWlsZXIKPDwKL1NpemUgNgovUm9vdCAxIDAgUgovSW5mbyA2IDAgUgo+PgpzdGFydHhyZWYKNDkyCiUlRU9G';
-      link.download = 'merged-document.pdf';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      alert('PDF files merged successfully! Download started.');
-    }, 2000);
+    }
   };
 
   return (
@@ -230,7 +297,45 @@ export default function MergePDFPage() {
             </div>
           </div>
         </div>
+
+        {/* Security Notice */}
+        <div className="mt-8 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <svg className="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <h4 className="text-sm font-medium text-yellow-800">Security Notice</h4>
+              <p className="mt-1 text-sm text-yellow-700">
+                If you see a security warning when downloading, click "Keep" to proceed. 
+                This happens because browsers are cautious about downloads from local development servers.
+                In production (HTTPS), downloads will be automatically trusted.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* Success Modal */}
+      {processedFileInfo && (
+        <SuccessModal
+          isOpen={showSuccessModal}
+          onClose={() => {
+            setShowSuccessModal(false);
+            if (processedFileInfo.downloadUrl) {
+              URL.revokeObjectURL(processedFileInfo.downloadUrl);
+            }
+            setProcessedFileInfo(null);
+          }}
+          title="PDFs Merged Successfully!"
+          message={`Your ${files.length} PDF files have been successfully merged into a single document.`}
+          fileName={processedFileInfo.fileName}
+          fileSize={processedFileInfo.fileSize}
+          downloadUrl={processedFileInfo.downloadUrl}
+        />
+      )}
     </div>
   );
 }

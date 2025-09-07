@@ -1,4 +1,19 @@
-export default function HeroSection() {
+'use client';
+
+interface HeroSectionProps {
+  onViewAllTools?: () => void;
+}
+
+export default function HeroSection({ onViewAllTools }: HeroSectionProps) {
+  const scrollToTools = () => {
+    const toolsSection = document.getElementById('tools-section');
+    if (toolsSection) {
+      toolsSection.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+
+  
   return (
     <section className="relative bg-gradient-to-br from-blue-50 to-indigo-100 py-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -11,10 +26,16 @@ export default function HeroSection() {
             Merge, split, compress, convert, rotate, unlock and watermark PDFs with just a few clicks.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <button className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-lg font-semibold text-lg transition-colors">
+            <button 
+              onClick={scrollToTools}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
+            >
               Start Using Tools
             </button>
-            <button className="border border-gray-300 hover:bg-gray-50 text-gray-700 px-8 py-4 rounded-lg font-semibold text-lg transition-colors">
+            <button 
+              onClick={onViewAllTools}
+              className="border border-gray-300 hover:bg-gray-50 text-gray-700 px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
+            >
               View All Tools
             </button>
           </div>

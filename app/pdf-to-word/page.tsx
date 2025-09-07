@@ -2,12 +2,16 @@
 
 import { useState, useRef } from 'react';
 import Link from 'next/link';
+import { convertFile, downloadFile } from '@/utils/pdfApi';
+import SuccessModal from '@/components/success-modal';
+import { useSuccessModal } from '@/utils/useSuccessModal';
 
 export default function PDFToWordPage() {
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { showSuccessModal, processedFileInfo, showSuccess, hideSuccess, createFileInfo } = useSuccessModal();
 
   const handleFileSelect = (selectedFile: File | null) => {
     if (selectedFile && selectedFile.type === 'application/pdf') {

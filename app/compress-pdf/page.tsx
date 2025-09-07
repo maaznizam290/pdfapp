@@ -2,12 +2,21 @@
 
 import { useState, useRef } from 'react';
 import Link from 'next/link';
+import { processPDF, downloadFile } from '@/utils/pdfApi';
+import SuccessModal from '@/components/success-modal';
 
 export default function CompressPDFPage() {
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [compressionLevel, setCompressionLevel] = useState<'low' | 'medium' | 'high'>('medium');
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [processedFileInfo, setProcessedFileInfo] = useState<{
+    fileName: string;
+    fileSize: number;
+    downloadUrl: string;
+    originalSize: number;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (selectedFile: File | null) => {
@@ -38,20 +47,35 @@ export default function CompressPDFPage() {
     
     setIsProcessing(true);
     
-    // Simulate processing
-    setTimeout(() => {
+    try {
+      const blob = await processPDF(file, 'compress', { compressionLevel });
+      
+      // Create download URL
+      const downloadUrl = URL.createObjectURL(blob);
+      const fileName = `compressed-${file.name.replace('.pdf', '')}-${new Date().toISOString().slice(0, 10)}.pdf`;
+      
+      // Calculate compression ratio
+      const originalSize = file.size;
+      const compressedSize = blob.size;
+      const compressionRatio = ((originalSize - compressedSize) / originalSize * 100).toFixed(1);
+      
+      // Set success modal data
+      setProcessedFileInfo({
+        fileName,
+        fileSize: compressedSize,
+        downloadUrl,
+        originalSize
+      });
+      
+      // Show success modal
+      setShowSuccessModal(true);
+      
+    } catch (error) {
+      console.error('Error compressing PDF:', error);
+      alert('Failed to compress PDF. Please try again.');
+    } finally {
       setIsProcessing(false);
-      
-      // Create a download link for the compressed PDF
-      const link = document.createElement('a');
-      link.href = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKL01lZGlhQm94IFswIDAgNTk1IDg0Ml0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovQ29udGVudHMgNCAwIFIKL1Jlc291cmNlcyA8PAovRm9udCA8PAovRjEgNSAwIFIKPj4KPj4KL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKENvbXByZXNzZWQgUERGKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgNSAwIFIKKENvbXByZXNzZWQgUERGKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjEgMCBvYmoKPDwKZW5kb2JqCnhwcmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTAwIDAwMDAwIG4gCjAwMDAwMDAwNzkgMDAwMDAgbiAKMDAwMDAwMDE3MyAwMDAwMCBuIAowMDAwMDAwMzAxIDAwMDAwIG4gCjAwMDAwMDAzODAgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA2Ci9Sb290IDEgMCBSCi9JbmZvIDYgMCBSCj4+CnN0YXJ0eHJlZgo0OTIKJSVFT0Y=';
-      link.download = 'compressed-document.pdf';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      alert('PDF compressed successfully! Download started.');
-    }, 2000);
+    }
   };
 
   const getCompressionInfo = () => {
@@ -266,6 +290,25 @@ export default function CompressPDFPage() {
           </div>
         </div>
       </div>
+
+      {/* Success Modal */}
+      {processedFileInfo && (
+        <SuccessModal
+          isOpen={showSuccessModal}
+          onClose={() => {
+            setShowSuccessModal(false);
+            if (processedFileInfo.downloadUrl) {
+              URL.revokeObjectURL(processedFileInfo.downloadUrl);
+            }
+            setProcessedFileInfo(null);
+          }}
+          title="PDF Compressed Successfully!"
+          message={`Your PDF has been compressed with ${compressionLevel} compression level.`}
+          fileName={processedFileInfo.fileName}
+          fileSize={processedFileInfo.fileSize}
+          downloadUrl={processedFileInfo.downloadUrl}
+        />
+      )}
     </div>
   );
 }

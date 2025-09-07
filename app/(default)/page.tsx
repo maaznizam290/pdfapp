@@ -21,7 +21,15 @@ export default function HomePage() {
 
   return (
     <>
-      <HeroSection />
+      <HeroSection onViewAllTools={() => {
+        setSelectedCategory('all');
+        setTimeout(() => {
+          const toolsSection = document.getElementById('tools-section');
+          if (toolsSection) {
+            toolsSection.scrollIntoView({ behavior: 'smooth' });
+          }
+        }, 100);
+      }} />
       
       {/* Category Filter */}
       <section className="py-8 bg-gray-50">
@@ -45,7 +53,7 @@ export default function HomePage() {
       </section>
 
       {/* PDF Tools Grid */}
-      <section className="py-12">
+      <section id="tools-section" className="py-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <PDFTools selectedCategory={selectedCategory} />
         </div>

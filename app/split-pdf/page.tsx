@@ -2,6 +2,8 @@
 
 import { useState, useRef } from 'react';
 import Link from 'next/link';
+import { processPDF, downloadFile } from '@/utils/pdfApi';
+import SuccessModal from '@/components/success-modal';
 
 export default function SplitPDFPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -10,6 +12,12 @@ export default function SplitPDFPage() {
   const [splitMethod, setSplitMethod] = useState<'range' | 'every' | 'extract'>('range');
   const [pageRange, setPageRange] = useState('');
   const [everyPages, setEveryPages] = useState(1);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [processedFileInfo, setProcessedFileInfo] = useState<{
+    fileName: string;
+    fileSize: number;
+    downloadUrl: string;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (selectedFile: File | null) => {
@@ -40,20 +48,41 @@ export default function SplitPDFPage() {
     
     setIsProcessing(true);
     
-    // Simulate processing
-    setTimeout(() => {
+    try {
+      // Parse page range
+      let pageRangeOptions = {};
+      
+      if (splitMethod === 'range' && pageRange) {
+        const [start, end] = pageRange.split('-').map(Number);
+        if (start && end) {
+          pageRangeOptions = { pageRange: { start, end } };
+        }
+      } else if (splitMethod === 'every') {
+        pageRangeOptions = { everyPages };
+      }
+      
+      const blob = await processPDF(file, 'split', pageRangeOptions);
+      
+      // Create download URL
+      const downloadUrl = URL.createObjectURL(blob);
+      const fileName = `split-document-${new Date().toISOString().slice(0, 10)}.pdf`;
+      
+      // Set success modal data
+      setProcessedFileInfo({
+        fileName,
+        fileSize: blob.size,
+        downloadUrl
+      });
+      
+      // Show success modal
+      setShowSuccessModal(true);
+      
+    } catch (error) {
+      console.error('Error splitting PDF:', error);
+      alert('Failed to split PDF. Please try again.');
+    } finally {
       setIsProcessing(false);
-      
-      // Create a download link for the split PDF
-      const link = document.createElement('a');
-      link.href = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKL01lZGlhQm94IFswIDAgNTk1IDg0Ml0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovQ29udGVudHMgNCAwIFIKL1Jlc291cmNlcyA8PAovRm9udCA8PAovRjEgNSAwIFIKPj4KPj4KL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKFNwbGl0IFBERikgVGogCkVUCmVuZHN0cmVhbQplbmRvYmoKNCAwIG9iago8PAovTGVuZ3RoIDExCj4+CnN0cmVhbQpCVAoxMjcgNzM3IFRkCi9GMSAxMiBUZgooU3BsaXQgUERGKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjEgMCBvYmoKPDwKZW5kb2JqCnhwcmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTAwIDAwMDAwIG4gCjAwMDAwMDAwNzkgMDAwMDAgbiAKMDAwMDAwMDE3MyAwMDAwMCBuIAowMDAwMDAwMzAxIDAwMDAwIG4gCjAwMDAwMDAzODAgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA2Ci9Sb290IDEgMCBSCi9JbmZvIDYgMCBSCj4+CnN0YXJ0eHJlZgo0OTIKJSVFT0Y=';
-      link.download = 'split-document.pdf';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      alert('PDF split successfully! Download started.');
-    }, 2000);
+    }
   };
 
   return (
@@ -267,6 +296,25 @@ export default function SplitPDFPage() {
           </div>
         </div>
       </div>
+
+      {/* Success Modal */}
+      {processedFileInfo && (
+        <SuccessModal
+          isOpen={showSuccessModal}
+          onClose={() => {
+            setShowSuccessModal(false);
+            if (processedFileInfo.downloadUrl) {
+              URL.revokeObjectURL(processedFileInfo.downloadUrl);
+            }
+            setProcessedFileInfo(null);
+          }}
+          title="PDF Split Successfully!"
+          message="Your PDF has been split according to your specifications."
+          fileName={processedFileInfo.fileName}
+          fileSize={processedFileInfo.fileSize}
+          downloadUrl={processedFileInfo.downloadUrl}
+        />
+      )}
     </div>
   );
 }

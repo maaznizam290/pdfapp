@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug PDF Merge</title>
+</head>
+<body>
+    <h1>Debug PDF Merge</h1>
+    <input type="file" id="file1" accept=".pdf" multiple>
+    <button onclick="testMerge()">Test Merge</button>
+    <div id="result"></div>
+
+    <script>
+        async function testMerge() {
+            const fileInput = document.getElementById('file1');
+            const files = fileInput.files;
+            
+            if (files.length < 2) {
+                document.getElementById('result').innerHTML = 'Please select at least 2 PDF files';
+                return;
+            }
+
+            console.log('Files selected:', Array.from(files).map(f => ({ name: f.name, size: f.size })));
+
+            const formData = new FormData();
+            formData.append('operation', 'merge');
+            
+            for (let i = 0; i < files.length; i++) {
+                formData.append('files', files[i]);
+            }
+
+            try {
+                console.log('Sending request...');
+                const response = await fetch('http://localhost:3000/api/pdf/process', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                console.log('Response status:', response.status);
+                console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('API Error:', errorText);
+                    document.getElementById('result').innerHTML = 'Error: ' + errorText;
+                    return;
+                }
+
+                const blob = await response.blob();
+                console.log('Success! Received blob:', blob.size, 'bytes, type:', blob.type);
+                
+                if (blob.size === 0) {
+                    document.getElementById('result').innerHTML = 'Error: Received empty file';
+                    return;
+                }
+
+                // Download the file
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'merged-test.pdf';
+                a.click();
+                URL.revokeObjectURL(url);
+
+                document.getElementById('result').innerHTML = 'Success! Downloaded merged PDF (' + blob.size + ' bytes)';
+
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('result').innerHTML = 'Error: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>
