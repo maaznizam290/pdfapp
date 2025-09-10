@@ -16,6 +16,7 @@ export default function CompressPDFPage() {
     fileSize: number;
     downloadUrl: string;
     originalSize: number;
+    compressionRatio: number;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -59,12 +60,21 @@ export default function CompressPDFPage() {
       const compressedSize = blob.size;
       const compressionRatio = ((originalSize - compressedSize) / originalSize * 100).toFixed(1);
       
+      console.log(`Compression completed: ${originalSize} -> ${compressedSize} bytes (${compressionRatio}% reduction) with ${compressionLevel} level`);
+      
+      // Check if compression was effective
+      const compressionEffective = parseFloat(compressionRatio) > 5;
+      if (!compressionEffective) {
+        console.warn(`Low compression ratio: ${compressionRatio}%. This PDF may already be optimized or contain mostly text.`);
+      }
+      
       // Set success modal data
       setProcessedFileInfo({
         fileName,
         fileSize: compressedSize,
         downloadUrl,
-        originalSize
+        originalSize,
+        compressionRatio: parseFloat(compressionRatio)
       });
       
       // Show success modal
@@ -303,7 +313,7 @@ export default function CompressPDFPage() {
             setProcessedFileInfo(null);
           }}
           title="PDF Compressed Successfully!"
-          message={`Your PDF has been compressed with ${compressionLevel} compression level.`}
+          message={`Your PDF has been compressed with ${compressionLevel} compression level. Size reduced by ${processedFileInfo.compressionRatio}%.${processedFileInfo.compressionRatio < 5 ? ' Note: This PDF may already be optimized or contain mostly text content.' : ''}`}
           fileName={processedFileInfo.fileName}
           fileSize={processedFileInfo.fileSize}
           downloadUrl={processedFileInfo.downloadUrl}

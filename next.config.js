@@ -1,5 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Suppress hydration warnings for browser extension interference
+  reactStrictMode: true,
+  swcMinify: true,
+  
   async headers() {
     return [
       {
