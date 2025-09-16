@@ -141,12 +141,25 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Helper function to extract text from PDF using pdf2json
-async function extractTextFromPDF(pdfBuffer: Buffer): Promise<string> {
+// Interface for formatted text elements
+interface FormattedTextElement {
+  text: string;
+  fontSize?: number;
+  fontFamily?: string;
+  bold?: boolean;
+  italic?: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// Helper function to extract formatted text from PDF using pdf2json
+async function extractFormattedTextFromPDF(pdfBuffer: Buffer): Promise<FormattedTextElement[]> {
   return new Promise((resolve, reject) => {
     try {
       const pdfParser = new PDFParser();
-      let extractedText = '';
+      const formattedElements: FormattedTextElement[] = [];
       
       pdfParser.on('pdfParser_dataError', (errData: any) => {
         console.error('PDF parsing error:', errData);
@@ -155,7 +168,7 @@ async function extractTextFromPDF(pdfBuffer: Buffer): Promise<string> {
       
       pdfParser.on('pdfParser_dataReady', (pdfData: any) => {
         try {
-          // Extract text from all pages
+          // Extract formatted text from all pages
           if (pdfData.Pages && pdfData.Pages.length > 0) {
             pdfData.Pages.forEach((page: any, pageIndex: number) => {
               if (page.Texts && page.Texts.length > 0) {
@@ -165,30 +178,86 @@ async function extractTextFromPDF(pdfBuffer: Buffer): Promise<string> {
                       if (textRun.T) {
                         // Decode the text (PDF text is often encoded)
                         const decodedText = decodeURIComponent(textRun.T);
-                        extractedText += decodedText + ' ';
+                        
+                        // Extract formatting information with better detection
+                        let fontSize = 12;
+                        let fontFamily = 'Arial';
+                        let bold = false;
+                        let italic = false;
+                        
+                        // Try to get formatting from textRun.TS array
+                        if (textRun.TS && Array.isArray(textRun.TS)) {
+                          fontSize = textRun.TS[0] || 12;
+                          const fontCode = textRun.TS[1];
+                          if (fontCode !== undefined) {
+                            fontFamily = getFontFamily(fontCode);
+                            bold = isBoldFont(fontCode);
+                            italic = isItalicFont(fontCode);
+                          }
+                        }
+                        
+                        // Try to get formatting from textItem.TS array
+                        if (textItem.TS && Array.isArray(textItem.TS)) {
+                          fontSize = textItem.TS[0] || fontSize;
+                          const fontCode = textItem.TS[1];
+                          if (fontCode !== undefined) {
+                            fontFamily = getFontFamily(fontCode);
+                            bold = isBoldFont(fontCode);
+                            italic = isItalicFont(fontCode);
+                          }
+                        }
+                        
+                        // Enhanced formatting detection based on text content and position
+                        if (fontSize > 14 || decodedText.length < 50) {
+                          // Likely a heading or title
+                          bold = true;
+                          fontSize = Math.max(fontSize, 14);
+                        }
+                        
+                        // Detect italic based on common patterns
+                        if (decodedText.includes('italic') || decodedText.includes('emphasis')) {
+                          italic = true;
+                        }
+                        
+                        // Debug logging for first few elements
+                        if (formattedElements.length < 5) {
+                          console.log(`Element ${formattedElements.length}: "${decodedText}" - Font: ${fontFamily}, Size: ${fontSize}, Bold: ${bold}, Italic: ${italic}`);
+                          console.log(`  TS data:`, textRun.TS, textItem.TS);
+                        }
+                        
+                        formattedElements.push({
+                          text: decodedText,
+                          fontSize: fontSize,
+                          fontFamily: fontFamily,
+                          bold: bold,
+                          italic: italic,
+                          x: textItem.x || 0,
+                          y: textItem.y || 0,
+                          width: textItem.w || 0,
+                          height: textItem.h || 0,
+                        });
                       }
                     });
                   }
                 });
-                extractedText += '\n\n'; // Add page break
               }
             });
           }
           
-          // Clean up the text
-          extractedText = extractedText
-            .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-            .replace(/\n\s*\n/g, '\n\n') // Clean up line breaks
-            .trim();
+          console.log(`Formatted text extraction completed. Extracted ${formattedElements.length} text elements.`);
           
-          if (extractedText.length === 0) {
-            extractedText = 'No text content found in this PDF. This may be an image-based or scanned PDF.';
-          }
+          // Debug: Show formatting distribution
+          const formattingStats = {
+            bold: formattedElements.filter(e => e.bold).length,
+            italic: formattedElements.filter(e => e.italic).length,
+            differentSizes: Array.from(new Set(formattedElements.map(e => e.fontSize))).length,
+            differentFonts: Array.from(new Set(formattedElements.map(e => e.fontFamily))).length
+          };
+          console.log('Formatting stats:', formattingStats);
           
-          console.log(`Text extraction completed. Extracted ${extractedText.length} characters.`);
-          resolve(extractedText);
+          resolve(formattedElements);
         } catch (error) {
-          console.error('Error processing extracted text:', error);
+          console.error('Error processing formatted text:', error);
           reject(error);
         }
       });
@@ -197,58 +266,137 @@ async function extractTextFromPDF(pdfBuffer: Buffer): Promise<string> {
       pdfParser.parseBuffer(pdfBuffer);
       
     } catch (error) {
-      console.error('Text extraction setup error:', error);
+      console.error('Formatted text extraction setup error:', error);
       reject(error);
     }
   });
 }
 
-// Helper function to convert PDF to Word using text extraction
+// Helper function to determine font family from PDF font code
+function getFontFamily(fontCode: number): string {
+  const fontMap: { [key: number]: string } = {
+    0: 'Arial',
+    1: 'Times-Roman',
+    2: 'Helvetica',
+    3: 'Courier',
+    4: 'Times-Bold',
+    5: 'Helvetica-Bold',
+    6: 'Courier-Bold',
+    7: 'Times-Italic',
+    8: 'Helvetica-Oblique',
+    9: 'Courier-Oblique',
+  };
+  return fontMap[fontCode] || 'Arial';
+}
+
+// Helper function to determine if font is bold
+function isBoldFont(fontCode: number): boolean {
+  return fontCode === 4 || fontCode === 5 || fontCode === 6;
+}
+
+// Helper function to determine if font is italic
+function isItalicFont(fontCode: number): boolean {
+  return fontCode === 7 || fontCode === 8 || fontCode === 9;
+}
+
+// Helper function to convert PDF to Word using formatted text extraction
 async function convertPDFToWordAlternative(pdfBuffer: Buffer): Promise<Buffer> {
   try {
-    console.log('Starting PDF to Word conversion using alternative method...');
+    console.log('Starting PDF to Word conversion with formatting preservation...');
     
-    // Extract text from PDF
-    const extractedText = await extractTextFromPDF(pdfBuffer);
+    // Extract formatted text from PDF
+    const formattedElements = await extractFormattedTextFromPDF(pdfBuffer);
     
-    if (!extractedText || extractedText.trim().length === 0) {
+    if (!formattedElements || formattedElements.length === 0) {
       throw new Error('No text content found in PDF');
     }
     
-    // Split text into paragraphs and clean up
-    const paragraphs = extractedText
-      .split('\n\n')
-      .map(p => p.trim())
-      .filter(p => p.length > 0);
+    // Group text elements by position to create paragraphs
+    const paragraphs = groupTextElementsIntoParagraphs(formattedElements);
     
-    // If no paragraphs found, split by single line breaks
-    const finalParagraphs = paragraphs.length > 0 ? paragraphs : 
-      extractedText.split('\n').filter(p => p.trim().length > 0);
+    // Debug: Show paragraph information
+    console.log(`Created ${paragraphs.length} paragraphs from ${formattedElements.length} elements`);
+    paragraphs.slice(0, 3).forEach((para, index) => {
+      console.log(`Paragraph ${index + 1}: ${para.length} elements`);
+      para.slice(0, 2).forEach((elem, elemIndex) => {
+        console.log(`  Element ${elemIndex + 1}: "${elem.text}" - Bold: ${elem.bold}, Size: ${elem.fontSize}`);
+      });
+    });
     
-    // Create Word document with proper formatting
+    // Create Word document with preserved formatting
     const doc = new Document({
       sections: [{
-        properties: {},
-        children: finalParagraphs.map(text => 
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: text.trim(),
-                size: 24, // 12pt font
-                font: 'Arial',
-              }),
-            ],
+        properties: {
+          page: {
+            margin: {
+              top: 720, // 0.5 inch
+              right: 720,
+              bottom: 720,
+              left: 720,
+            },
+          },
+        },
+        children: paragraphs.map((paragraph, index) => {
+          // Group elements by formatting to create runs
+          const runs: any[] = [];
+          let currentRun: any = null;
+          
+          paragraph.forEach(element => {
+            const runKey = `${element.fontSize}-${element.fontFamily}-${element.bold}-${element.italic}`;
+            
+            if (!currentRun || currentRun.key !== runKey) {
+              // Start a new run
+              if (currentRun) {
+                runs.push(currentRun.run);
+              }
+              
+              // Ensure we have valid formatting values
+              const fontSize = Math.max(element.fontSize || 12, 8) * 2; // Convert to half-points
+              const fontFamily = element.fontFamily || 'Arial';
+              const isBold = Boolean(element.bold);
+              const isItalic = Boolean(element.italic);
+              
+              // Debug logging for first few runs
+              if (runs.length < 3) {
+                console.log(`Creating run: "${element.text}" - Font: ${fontFamily}, Size: ${fontSize}, Bold: ${isBold}, Italic: ${isItalic}`);
+              }
+              
+              currentRun = {
+                key: runKey,
+                run: new TextRun({
+                  text: element.text,
+                  size: fontSize,
+                  font: fontFamily,
+                  bold: isBold,
+                  italics: isItalic,
+                })
+              };
+            } else {
+              // Append to current run
+              currentRun.run.text += element.text;
+            }
+          });
+          
+          // Add the last run
+          if (currentRun) {
+            runs.push(currentRun.run);
+          }
+          
+          return new Paragraph({
+            children: runs,
             spacing: {
               after: 200, // Add spacing after paragraphs
+              before: 0,
             },
-          })
-        ),
+            alignment: 'left',
+          });
+        }),
       }],
     });
     
     // Generate DOCX buffer
     const buffer = await Packer.toBuffer(doc);
-    console.log(`PDF to Word conversion completed. Document size: ${buffer.length} bytes`);
+    console.log(`PDF to Word conversion completed with formatting. Document size: ${buffer.length} bytes`);
     
     return buffer;
   } catch (error) {
@@ -257,40 +405,124 @@ async function convertPDFToWordAlternative(pdfBuffer: Buffer): Promise<Buffer> {
   }
 }
 
-// Helper function to convert PDF to PowerPoint using text extraction
+// Helper function to group text elements into paragraphs based on position
+function groupTextElementsIntoParagraphs(elements: FormattedTextElement[]): FormattedTextElement[][] {
+  if (elements.length === 0) return [];
+  
+  // Sort elements by Y position (top to bottom) and then by X position (left to right)
+  const sortedElements = elements.sort((a, b) => {
+    if (Math.abs(a.y - b.y) > 5) { // Different lines (5pt tolerance)
+      return b.y - a.y; // Higher Y values first (top to bottom)
+    }
+    return a.x - b.x; // Same line, sort by X position
+  });
+  
+  const paragraphs: FormattedTextElement[][] = [];
+  let currentParagraph: FormattedTextElement[] = [];
+  let lastY = sortedElements[0]?.y || 0;
+  
+  // Group elements by Y position (lines)
+  const lines: FormattedTextElement[][] = [];
+  let currentLine: FormattedTextElement[] = [];
+  
+  for (const element of sortedElements) {
+    // If Y position changes significantly, start a new line
+    if (Math.abs(element.y - lastY) > 8) { // 8pt tolerance for new line
+      if (currentLine.length > 0) {
+        lines.push([...currentLine]);
+        currentLine = [];
+      }
+    }
+    
+    currentLine.push(element);
+    lastY = element.y;
+  }
+  
+  // Add the last line
+  if (currentLine.length > 0) {
+    lines.push(currentLine);
+  }
+  
+  // Group lines into paragraphs based on spacing and content
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const nextLine = lines[i + 1];
+    
+    // Add current line to current paragraph
+    currentParagraph.push(...line);
+    
+    // Check if we should start a new paragraph
+    const shouldBreakParagraph = 
+      !nextLine || // Last line
+      (nextLine && line.length > 0 && nextLine.length > 0 && 
+       Math.abs(nextLine[0].y - line[0].y) > 20) || // Large vertical gap
+      (nextLine && line.length > 0 && nextLine.length > 0 && 
+       line[0].fontSize && nextLine[0].fontSize && 
+       Math.abs(line[0].fontSize - nextLine[0].fontSize) > 2); // Different font sizes
+    
+    if (shouldBreakParagraph) {
+      if (currentParagraph.length > 0) {
+        paragraphs.push([...currentParagraph]);
+        currentParagraph = [];
+      }
+    }
+  }
+  
+  // Add the last paragraph if it exists
+  if (currentParagraph.length > 0) {
+    paragraphs.push(currentParagraph);
+  }
+  
+  console.log(`Grouped ${elements.length} elements into ${lines.length} lines and ${paragraphs.length} paragraphs`);
+  
+  return paragraphs;
+}
+
+// Helper function to convert PDF to PowerPoint using formatted text extraction
 async function convertPDFToPowerPointAlternative(pdfBuffer: Buffer): Promise<Buffer> {
   try {
-    console.log('Starting PDF to PowerPoint conversion using alternative method...');
+    console.log('Starting PDF to PowerPoint conversion with formatting preservation...');
     
-    // Extract text from PDF
-    const extractedText = await extractTextFromPDF(pdfBuffer);
+    // Extract formatted text from PDF
+    const formattedElements = await extractFormattedTextFromPDF(pdfBuffer);
     
-    if (!extractedText || extractedText.trim().length === 0) {
+    if (!formattedElements || formattedElements.length === 0) {
       throw new Error('No text content found in PDF');
     }
     
-    // Split text into slides (by paragraphs or page breaks)
-    const slides = extractedText.split('\n\n').filter(s => s.trim().length > 0);
+    // Group text elements into paragraphs and then into slides
+    const paragraphs = groupTextElementsIntoParagraphs(formattedElements);
     
     // Create PowerPoint presentation
     const pptx = new pptxgen();
     
-    // Add slides
-    slides.forEach((slideText, index) => {
+    // Add slides (each paragraph becomes a slide)
+    paragraphs.forEach((paragraph, index) => {
       const slide = pptx.addSlide();
+      
+      // Combine text from paragraph elements
+      const slideText = paragraph.map(element => element.text).join(' ');
+      
+      // Determine if text should be bold or italic based on elements
+      const hasBold = paragraph.some(element => element.bold);
+      const hasItalic = paragraph.some(element => element.italic);
+      const avgFontSize = paragraph.reduce((sum, element) => sum + (element.fontSize || 12), 0) / paragraph.length;
+      
       slide.addText(slideText.trim(), {
         x: 1,
         y: 1,
         w: 8,
         h: 6,
-        fontSize: 18,
+        fontSize: Math.max(avgFontSize || 18, 12),
+        bold: hasBold,
+        italic: hasItalic,
         align: 'left',
         valign: 'top',
       });
     });
     
     // If no slides were created, add a default slide
-    if (slides.length === 0) {
+    if (paragraphs.length === 0) {
       const slide = pptx.addSlide();
       slide.addText('PDF Content', {
         x: 1,
@@ -305,7 +537,7 @@ async function convertPDFToPowerPointAlternative(pdfBuffer: Buffer): Promise<Buf
     
     // Generate PPTX buffer
     const buffer = await pptx.write({ outputType: 'nodebuffer' });
-    console.log(`PDF to PowerPoint conversion completed. Presentation size: ${Buffer.isBuffer(buffer) ? buffer.length : 'unknown'} bytes`);
+    console.log(`PDF to PowerPoint conversion completed with formatting. Presentation size: ${Buffer.isBuffer(buffer) ? buffer.length : 'unknown'} bytes`);
     
     return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer as ArrayBuffer);
   } catch (error) {
@@ -314,31 +546,44 @@ async function convertPDFToPowerPointAlternative(pdfBuffer: Buffer): Promise<Buf
   }
 }
 
-// Helper function to convert PDF to Excel
+// Helper function to convert PDF to Excel using formatted text extraction
 async function convertPDFToExcel(pdfBuffer: Buffer): Promise<Buffer> {
   try {
-    console.log('Starting PDF to Excel conversion...');
+    console.log('Starting PDF to Excel conversion with formatting preservation...');
     
-    // Extract text from PDF
-    const extractedText = await extractTextFromPDF(pdfBuffer);
+    // Extract formatted text from PDF
+    const formattedElements = await extractFormattedTextFromPDF(pdfBuffer);
     
-    if (!extractedText || extractedText.trim().length === 0) {
+    if (!formattedElements || formattedElements.length === 0) {
       throw new Error('No text content found in PDF');
     }
     
+    // Group text elements into paragraphs
+    const paragraphs = groupTextElementsIntoParagraphs(formattedElements);
+    
     // Create a new workbook
     const workbook = XLSX.utils.book_new();
-    
-    // Split text into lines and create a worksheet
-    const lines = extractedText.split('\n').filter(line => line.trim().length > 0);
     const data: string[][] = [];
     
     // Add header
-    data.push(['Line Number', 'Content']);
+    data.push(['Paragraph', 'Text Content', 'Font Size', 'Font Family', 'Bold', 'Italic']);
     
-    // Add data rows
-    lines.forEach((line, index) => {
-      data.push([(index + 1).toString(), line.trim()]);
+    // Add data rows with formatting information
+    paragraphs.forEach((paragraph, index) => {
+      const textContent = paragraph.map(element => element.text).join(' ');
+      const avgFontSize = paragraph.reduce((sum, element) => sum + (element.fontSize || 12), 0) / paragraph.length;
+      const fontFamily = paragraph[0]?.fontFamily || 'Arial';
+      const hasBold = paragraph.some(element => element.bold);
+      const hasItalic = paragraph.some(element => element.italic);
+      
+      data.push([
+        (index + 1).toString(),
+        textContent.trim(),
+        avgFontSize.toFixed(1),
+        fontFamily,
+        hasBold ? 'Yes' : 'No',
+        hasItalic ? 'Yes' : 'No'
+      ]);
     });
     
     // Create worksheet
@@ -347,7 +592,7 @@ async function convertPDFToExcel(pdfBuffer: Buffer): Promise<Buffer> {
     
     // Convert to buffer
     const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    console.log(`PDF to Excel conversion completed. Spreadsheet size: ${excelBuffer.length} bytes`);
+    console.log(`PDF to Excel conversion completed with formatting. Spreadsheet size: ${excelBuffer.length} bytes`);
     
     return Buffer.from(excelBuffer);
   } catch (error) {
