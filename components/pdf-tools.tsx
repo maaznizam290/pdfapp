@@ -60,15 +60,6 @@ export default function PDFTools({ selectedCategory }: PDFToolsProps) {
 
     // Optimize PDF
     {
-      id: 'compress-pdf',
-      name: 'Compress PDF',
-      description: 'Reduce file size while optimizing for maximal PDF quality.',
-      icon: '🗜️',
-      category: 'optimize',
-      color: 'bg-indigo-500',
-      isNew: false,
-    },
-    {
       id: 'repair-pdf',
       name: 'Repair PDF',
       description: 'Repair a damaged PDF and recover data from corrupt PDF.',

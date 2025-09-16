@@ -2,16 +2,17 @@
 
 import { useState, useRef } from 'react';
 import Link from 'next/link';
-import { convertFile, downloadFile } from '@/utils/pdfApi';
+import { convertFile } from '@/utils/pdfApi';
 import SuccessModal from '@/components/success-modal';
 import { useSuccessModal } from '@/utils/useSuccessModal';
+import PdfConverter from '@/components/Pdfconverter';
 
 export default function PDFToWordPage() {
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { showSuccessModal, processedFileInfo, showSuccess, hideSuccess, createFileInfo } = useSuccessModal();
+  const { showSuccessModal, processedFileInfo, showSuccess, hideSuccess } = useSuccessModal();
 
   const handleFileSelect = (selectedFile: File | null) => {
     if (selectedFile && selectedFile.type === 'application/pdf') {
@@ -45,46 +46,31 @@ export default function PDFToWordPage() {
     setIsProcessing(true);
     
     try {
-      console.log('Starting PDF to Word conversion with file:', { name: file.name, size: file.size });
-      
       const blob = await convertFile(file, 'pdf-to-word');
-      console.log('Conversion successful, blob size:', blob.size);
       
       if (blob.size === 0) {
-        throw new Error('Generated Word document is empty');
+        throw new Error('Generated document is empty');
       }
       
-      // Create download URL
-      const downloadUrl = URL.createObjectURL(blob);
-      const fileName = `converted-document-${new Date().toISOString().slice(0, 10)}.docx`;
+      const baseName = file.name.replace(/\.pdf$/i, '');
+      const fileName = `${baseName}-converted-${new Date().toISOString().slice(0, 10)}.docx`;
       
-      // Trigger immediate download
+      const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = downloadUrl;
+      link.href = url;
       link.download = fileName;
       link.style.display = 'none';
-      link.setAttribute('download', fileName);
-      link.setAttribute('rel', 'noopener noreferrer');
-      
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      URL.revokeObjectURL(url);
       
-      // Clean up URL
-      URL.revokeObjectURL(downloadUrl);
-      
-      // Set success modal data
-      setProcessedFileInfo({
+      showSuccess({
         fileName,
         fileSize: blob.size,
-        downloadUrl: ''
+        downloadUrl: '',
       });
-      
-      // Show success modal
-      setShowSuccessModal(true);
-      
     } catch (error) {
-      console.error('Error converting PDF to Word:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       alert(`Failed to convert PDF to Word: ${errorMessage}. Please try again.`);
     } finally {
@@ -95,12 +81,8 @@ export default function PDFToWordPage() {
   return (
     <div className="min-h-screen bg-gray-50 py-12">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
         <div className="text-center mb-8">
-          <Link 
-            href="/"
-            className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-700 mb-4"
-          >
+          <Link href="/" className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-700 mb-4">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
@@ -112,12 +94,9 @@ export default function PDFToWordPage() {
           </p>
         </div>
 
-        {/* File Upload Area */}
         <div 
           className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-            isDragOver 
-              ? 'border-blue-400 bg-blue-50' 
-              : 'border-gray-300 bg-white'
+            isDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 bg-white'
           }`}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -147,7 +126,6 @@ export default function PDFToWordPage() {
           />
         </div>
 
-        {/* File Info */}
         {file && (
           <div className="mt-8 bg-white rounded-lg shadow-sm border">
             <div className="p-6">
@@ -167,7 +145,6 @@ export default function PDFToWordPage() {
           </div>
         )}
 
-        {/* Convert Button */}
         {file && (
           <div className="mt-8 text-center">
             <button
@@ -187,7 +164,6 @@ export default function PDFToWordPage() {
           </div>
         )}
 
-        {/* Instructions */}
         <div className="mt-12 bg-blue-50 rounded-lg p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">How to convert PDF to Word</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -214,6 +190,12 @@ export default function PDFToWordPage() {
             </div>
           </div>
         </div>
+
+        <SuccessModal
+          isOpen={showSuccessModal}
+          onClose={hideSuccess}
+          fileInfo={processedFileInfo}
+        />
       </div>
     </div>
   );

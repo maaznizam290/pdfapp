@@ -19,13 +19,6 @@ export default function ToolsPage() {
       category: 'Edit'
     },
     {
-      name: 'Compress PDF',
-      description: 'Reduce PDF file size while maintaining quality',
-      icon: '🗜️',
-      href: '/compress-pdf',
-      category: 'Optimize'
-    },
-    {
       name: 'Convert PDF',
       description: 'Convert PDF to Word, Excel, PowerPoint, or images',
       icon: '🔄',

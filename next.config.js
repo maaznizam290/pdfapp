@@ -2,7 +2,8 @@
 const nextConfig = {
   // Suppress hydration warnings for browser extension interference
   reactStrictMode: true,
-  swcMinify: true,
+  // Add allowedDevOrigins to fix cross-origin warning
+  allowedDevOrigins: ['192.168.10.131'],
   
   async headers() {
     return [

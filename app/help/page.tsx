@@ -49,7 +49,6 @@ export default function HelpPage() {
   const tools = [
     { name: 'Merge PDF', description: 'Combine multiple PDFs into one', href: '/merge-pdf' },
     { name: 'Split PDF', description: 'Separate PDF into multiple files', href: '/split-pdf' },
-    { name: 'Compress PDF', description: 'Reduce PDF file size', href: '/compress-pdf' },
     { name: 'Word to PDF', description: 'Convert Word documents to PDF', href: '/word-to-pdf' },
     { name: 'PDF to Word', description: 'Convert PDF to Word documents', href: '/pdf-to-word' },
     { name: 'Protect PDF', description: 'Add password protection', href: '/protect-pdf' },

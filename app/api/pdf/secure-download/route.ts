@@ -2,20 +2,37 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PDFDocument } from 'pdf-lib';
 
 export async function POST(request: NextRequest) {
+  const requestId = `secure-download-${Date.now()}`;
+  
+  console.log(`[${requestId}] --- New secure download request received ---`);
+
   try {
     const formData = await request.formData();
     const files = formData.getAll('files') as File[];
     const operation = formData.get('operation') as string;
 
+    console.log(`[${requestId}] Step 1: Form data parsed. Operation: ${operation}, Files: ${files.length}`);
+
     if (!files || files.length === 0) {
+      console.error(`[${requestId}] Validation failed: No files provided.`);
       return NextResponse.json({ error: 'No files provided' }, { status: 400 });
     }
 
     if (!operation) {
+      console.error(`[${requestId}] Validation failed: No operation specified.`);
       return NextResponse.json({ error: 'No operation specified' }, { status: 400 });
     }
 
+    // Validate operation
+    const supportedOperations = ['merge'];
+    if (!supportedOperations.includes(operation)) {
+      console.error(`[${requestId}] Validation failed: Unsupported operation '${operation}'.`);
+      return NextResponse.json({ error: `Unsupported operation: ${operation}` }, { status: 400 });
+    }
+
     let resultBuffer: Buffer;
+
+    console.log(`[${requestId}] Step 2: Starting secure ${operation} operation...`);
 
     try {
       switch (operation) {
@@ -26,12 +43,16 @@ export async function POST(request: NextRequest) {
           throw new Error(`Unsupported operation: ${operation}`);
       }
 
+      console.log(`[${requestId}] Step 3: Operation completed successfully. Result size: ${resultBuffer.length} bytes`);
+
       // Generate a secure filename with timestamp
       const timestamp = Date.now();
-      const secureFilename = `merged-document-${timestamp}.pdf`;
+      const secureFilename = `secure-${operation}-document-${timestamp}.pdf`;
+      
+      console.log(`[${requestId}] Step 4: Preparing secure download response with filename '${secureFilename}'.`);
       
       // Return the processed file with maximum security headers
-      return new NextResponse(resultBuffer, {
+      return new NextResponse(new Uint8Array(resultBuffer), {
         headers: {
           'Content-Type': 'application/pdf',
           'Content-Disposition': `attachment; filename="${secureFilename}"`,
@@ -44,21 +65,23 @@ export async function POST(request: NextRequest) {
           'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
           'X-Download-Options': 'noopen',
           'X-Permitted-Cross-Domain-Policies': 'none',
+          'Referrer-Policy': 'no-referrer',
+          'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
         },
       });
 
-    } catch (error) {
-      console.error('PDF processing error:', error);
+    } catch (error: any) {
+      console.error(`[${requestId}] PDF processing error:`, error);
       return NextResponse.json(
-        { error: 'PDF processing failed', details: error instanceof Error ? error.message : 'Unknown error' },
+        { error: 'PDF processing failed', details: error.message },
         { status: 500 }
       );
     }
 
-  } catch (error) {
-    console.error('Secure download endpoint error:', error);
+  } catch (error: any) {
+    console.error(`[${requestId}] Secure download endpoint error:`, error);
     return NextResponse.json(
-      { error: 'Request processing failed', details: error instanceof Error ? error.message : 'Unknown error' },
+      { error: 'Request processing failed', details: error.message },
       { status: 500 }
     );
   }

@@ -24,7 +24,6 @@ export default function PDFToolCard({ tool }: PDFToolCardProps) {
     const pathMap: { [key: string]: string } = {
       'merge-pdf': '/merge-pdf',
       'split-pdf': '/split-pdf',
-      'compress-pdf': '/compress-pdf',
       'pdf-to-word': '/pdf-to-word',
       'word-to-pdf': '/word-to-pdf',
       'edit-pdf': '/edit-pdf',
