@@ -62,8 +62,16 @@ export async function POST(request: NextRequest) {
           console.log(`[${requestId}] LibreOffice conversion successful for PDF to Word`);
         } catch (libreOfficeError: any) {
           console.log(`[${requestId}] LibreOffice not available, using alternative method: ${libreOfficeError?.message || 'Unknown error'}`);
-          // Fallback to text extraction and DOCX creation
-          resultBuffer = await convertPDFToWordAlternative(fileBuffer);
+          try {
+            // Fallback to text extraction and DOCX creation
+            resultBuffer = await convertPDFToWordAlternative(fileBuffer);
+            console.log(`[${requestId}] Alternative PDF to Word conversion successful`);
+          } catch (alternativeError: any) {
+            console.error(`[${requestId}] Alternative conversion also failed: ${alternativeError?.message || 'Unknown error'}`);
+            // Create a simple fallback document
+            resultBuffer = await createSimpleWordDocument(fileBuffer);
+            console.log(`[${requestId}] Simple fallback Word document created`);
+          }
         }
         contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
         fileExtension = 'docx';
@@ -163,7 +171,7 @@ async function extractFormattedTextFromPDF(pdfBuffer: Buffer): Promise<Formatted
       
       pdfParser.on('pdfParser_dataError', (errData: any) => {
         console.error('PDF parsing error:', errData);
-        reject(new Error('Failed to parse PDF: ' + errData.parserError));
+        reject(new Error('Failed to parse PDF: ' + (errData.parserError || 'Unknown parsing error')));
       });
       
       pdfParser.on('pdfParser_dataReady', (pdfData: any) => {
@@ -176,66 +184,80 @@ async function extractFormattedTextFromPDF(pdfBuffer: Buffer): Promise<Formatted
                   if (textItem.R && textItem.R.length > 0) {
                     textItem.R.forEach((textRun: any) => {
                       if (textRun.T) {
-                        // Decode the text (PDF text is often encoded)
-                        const decodedText = decodeURIComponent(textRun.T);
-                        
-                        // Extract formatting information with better detection
-                        let fontSize = 12;
-                        let fontFamily = 'Arial';
-                        let bold = false;
-                        let italic = false;
-                        
-                        // Try to get formatting from textRun.TS array
-                        if (textRun.TS && Array.isArray(textRun.TS)) {
-                          fontSize = textRun.TS[0] || 12;
-                          const fontCode = textRun.TS[1];
-                          if (fontCode !== undefined) {
-                            fontFamily = getFontFamily(fontCode);
-                            bold = isBoldFont(fontCode);
-                            italic = isItalicFont(fontCode);
+                        try {
+                          // Decode the text (PDF text is often encoded)
+                          const decodedText = decodeURIComponent(textRun.T);
+                          
+                          // Extract formatting information with better detection
+                          let fontSize = 12;
+                          let fontFamily = 'Arial';
+                          let bold = false;
+                          let italic = false;
+                          
+                          // Try to get formatting from textRun.TS array
+                          if (textRun.TS && Array.isArray(textRun.TS)) {
+                            fontSize = textRun.TS[0] || 12;
+                            const fontCode = textRun.TS[1];
+                            if (fontCode !== undefined) {
+                              fontFamily = getFontFamily(fontCode);
+                              bold = isBoldFont(fontCode);
+                              italic = isItalicFont(fontCode);
+                            }
                           }
-                        }
-                        
-                        // Try to get formatting from textItem.TS array
-                        if (textItem.TS && Array.isArray(textItem.TS)) {
-                          fontSize = textItem.TS[0] || fontSize;
-                          const fontCode = textItem.TS[1];
-                          if (fontCode !== undefined) {
-                            fontFamily = getFontFamily(fontCode);
-                            bold = isBoldFont(fontCode);
-                            italic = isItalicFont(fontCode);
+                          
+                          // Try to get formatting from textItem.TS array
+                          if (textItem.TS && Array.isArray(textItem.TS)) {
+                            fontSize = textItem.TS[0] || fontSize;
+                            const fontCode = textItem.TS[1];
+                            if (fontCode !== undefined) {
+                              fontFamily = getFontFamily(fontCode);
+                              bold = isBoldFont(fontCode);
+                              italic = isItalicFont(fontCode);
+                            }
                           }
-                        }
+                          
+                          // Enhanced formatting detection based on text content and position
+                          if (fontSize > 14 || decodedText.length < 50) {
+                            // Likely a heading or title
+                            bold = true;
+                            fontSize = Math.max(fontSize, 14);
+                          }
+                          
+                          // Detect italic based on common patterns
+                          if (decodedText.includes('italic') || decodedText.includes('emphasis')) {
+                            italic = true;
+                          }
+                          
+                          // Debug logging for first few elements
+                          if (formattedElements.length < 5) {
+                            console.log(`Element ${formattedElements.length}: "${decodedText}" - Font: ${fontFamily}, Size: ${fontSize}, Bold: ${bold}, Italic: ${italic}`);
+                            console.log(`  TS data:`, textRun.TS, textItem.TS);
+                          }
+                          
+                        // Clean up the text
+                        const cleanedText = decodedText
+                          .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+                          .replace(/^\s+|\s+$/g, '') // Trim whitespace
+                          .replace(/[\u00A0\u2000-\u200B\u2028\u2029]/g, ' '); // Replace non-breaking spaces
                         
-                        // Enhanced formatting detection based on text content and position
-                        if (fontSize > 14 || decodedText.length < 50) {
-                          // Likely a heading or title
-                          bold = true;
-                          fontSize = Math.max(fontSize, 14);
+                        // Only add non-empty text elements
+                        if (cleanedText.length > 0) {
+                          formattedElements.push({
+                            text: cleanedText,
+                            fontSize: fontSize,
+                            fontFamily: fontFamily,
+                            bold: bold,
+                            italic: italic,
+                            x: textItem.x || 0,
+                            y: textItem.y || 0,
+                            width: textItem.w || 0,
+                            height: textItem.h || 0,
+                          });
                         }
-                        
-                        // Detect italic based on common patterns
-                        if (decodedText.includes('italic') || decodedText.includes('emphasis')) {
-                          italic = true;
+                        } catch (textError) {
+                          console.error('Error processing text element:', textError);
+                          // Continue processing other elements
                         }
-                        
-                        // Debug logging for first few elements
-                        if (formattedElements.length < 5) {
-                          console.log(`Element ${formattedElements.length}: "${decodedText}" - Font: ${fontFamily}, Size: ${fontSize}, Bold: ${bold}, Italic: ${italic}`);
-                          console.log(`  TS data:`, textRun.TS, textItem.TS);
-                        }
-                        
-                        formattedElements.push({
-                          text: decodedText,
-                          fontSize: fontSize,
-                          fontFamily: fontFamily,
-                          bold: bold,
-                          italic: italic,
-                          x: textItem.x || 0,
-                          y: textItem.y || 0,
-                          width: textItem.w || 0,
-                          height: textItem.h || 0,
-                        });
                       }
                     });
                   }
@@ -316,8 +338,10 @@ async function convertPDFToWordAlternative(pdfBuffer: Buffer): Promise<Buffer> {
     
     // Debug: Show paragraph information
     console.log(`Created ${paragraphs.length} paragraphs from ${formattedElements.length} elements`);
-    paragraphs.slice(0, 3).forEach((para, index) => {
+    paragraphs.slice(0, 5).forEach((para, index) => {
       console.log(`Paragraph ${index + 1}: ${para.length} elements`);
+      const textContent = para.map(e => e.text).join(' ').substring(0, 100);
+      console.log(`  Text preview: "${textContent}${textContent.length >= 100 ? '...' : ''}"`);
       para.slice(0, 2).forEach((elem, elemIndex) => {
         console.log(`  Element ${elemIndex + 1}: "${elem.text}" - Bold: ${elem.bold}, Size: ${elem.fontSize}`);
       });
@@ -337,59 +361,107 @@ async function convertPDFToWordAlternative(pdfBuffer: Buffer): Promise<Buffer> {
           },
         },
         children: paragraphs.map((paragraph, index) => {
-          // Group elements by formatting to create runs
-          const runs: any[] = [];
-          let currentRun: any = null;
-          
-          paragraph.forEach(element => {
-            const runKey = `${element.fontSize}-${element.fontFamily}-${element.bold}-${element.italic}`;
+          try {
+            // Group elements by formatting to create runs
+            const runs: any[] = [];
+            let currentRun: any = null;
             
-            if (!currentRun || currentRun.key !== runKey) {
-              // Start a new run
-              if (currentRun) {
-                runs.push(currentRun.run);
+            paragraph.forEach(element => {
+              const runKey = `${element.fontSize}-${element.fontFamily}-${element.bold}-${element.italic}`;
+              
+              if (!currentRun || currentRun.key !== runKey) {
+                // Start a new run
+                if (currentRun) {
+                  runs.push(currentRun.run);
+                }
+                
+                // Ensure we have valid formatting values
+                const fontSize = Math.max(element.fontSize || 12, 8) * 2; // Convert to half-points
+                const fontFamily = element.fontFamily || 'Arial';
+                const isBold = Boolean(element.bold);
+                const isItalic = Boolean(element.italic);
+                
+                // Debug logging for first few runs
+                if (runs.length < 3) {
+                  console.log(`Creating run: "${element.text}" - Font: ${fontFamily}, Size: ${fontSize}, Bold: ${isBold}, Italic: ${isItalic}`);
+                }
+                
+                currentRun = {
+                  key: runKey,
+                  run: new TextRun({
+                    text: element.text || ' ',
+                    size: fontSize,
+                    font: fontFamily,
+                    bold: isBold,
+                    italics: isItalic,
+                  })
+                };
+              } else {
+                // Append to current run with proper spacing
+                if (currentRun && currentRun.run && currentRun.run.text !== undefined) {
+                  const needsSpace = currentRun.run.text.length > 0 && 
+                                    !currentRun.run.text.endsWith(' ') && 
+                                    !element.text.startsWith(' ') &&
+                                    element.text.length > 0;
+                  currentRun.run.text += (needsSpace ? ' ' : '') + (element.text || ' ');
+                }
               }
-              
-              // Ensure we have valid formatting values
-              const fontSize = Math.max(element.fontSize || 12, 8) * 2; // Convert to half-points
-              const fontFamily = element.fontFamily || 'Arial';
-              const isBold = Boolean(element.bold);
-              const isItalic = Boolean(element.italic);
-              
-              // Debug logging for first few runs
-              if (runs.length < 3) {
-                console.log(`Creating run: "${element.text}" - Font: ${fontFamily}, Size: ${fontSize}, Bold: ${isBold}, Italic: ${isItalic}`);
-              }
-              
-              currentRun = {
-                key: runKey,
-                run: new TextRun({
-                  text: element.text,
-                  size: fontSize,
-                  font: fontFamily,
-                  bold: isBold,
-                  italics: isItalic,
-                })
-              };
-            } else {
-              // Append to current run
-              currentRun.run.text += element.text;
+            });
+            
+            // Add the last run
+            if (currentRun) {
+              runs.push(currentRun.run);
             }
-          });
-          
-          // Add the last run
-          if (currentRun) {
-            runs.push(currentRun.run);
+            
+            // Ensure we have at least one run
+            if (runs.length === 0) {
+              runs.push(new TextRun({ text: ' ' }));
+            }
+            
+            // Determine if this paragraph is a heading
+            const isHeadingPara = isHeading(paragraph);
+            const avgFontSize = paragraph.reduce((sum, element) => sum + (element.fontSize || 12), 0) / paragraph.length;
+            
+            // Calculate spacing based on content type
+            let spacingAfter = 200; // Default spacing
+            let spacingBefore = 0;
+            
+            if (isHeadingPara) {
+              spacingAfter = 240; // More space after headings
+              spacingBefore = 120; // Space before headings
+            } else if (avgFontSize > 14) {
+              spacingAfter = 180; // Slightly less space for large text
+            }
+            
+            // Determine alignment based on indentation
+            let alignment: 'left' | 'center' | 'right' | 'justify' = 'left';
+            const firstElement = paragraph[0];
+            if (firstElement && firstElement.x > 100) {
+              // If text is significantly indented, keep it left-aligned but note the indentation
+              alignment = 'left';
+            }
+            
+            return new Paragraph({
+              children: runs,
+              spacing: {
+                after: spacingAfter,
+                before: spacingBefore,
+              },
+              alignment: alignment,
+              indent: {
+                left: firstElement && firstElement.x > 50 ? Math.min(firstElement.x * 2, 1440) : 0, // Convert to twips, max 1 inch
+              },
+            });
+          } catch (paragraphError) {
+            console.error(`Error creating paragraph ${index}:`, paragraphError);
+            // Return a simple paragraph with the text content
+            const textContent = paragraph.map(e => e.text || '').join(' ');
+            return new Paragraph({
+              children: [new TextRun({ text: textContent || ' ' })],
+              spacing: { after: 200, before: 0 },
+              alignment: 'left',
+            });
           }
-          
-          return new Paragraph({
-            children: runs,
-            spacing: {
-              after: 200, // Add spacing after paragraphs
-              before: 0,
-            },
-            alignment: 'left',
-          });
         }),
       }],
     });
@@ -427,7 +499,7 @@ function groupTextElementsIntoParagraphs(elements: FormattedTextElement[]): Form
   
   for (const element of sortedElements) {
     // If Y position changes significantly, start a new line
-    if (Math.abs(element.y - lastY) > 8) { // 8pt tolerance for new line
+    if (Math.abs(element.y - lastY) > 5) { // Reduced tolerance for better line detection
       if (currentLine.length > 0) {
         lines.push([...currentLine]);
         currentLine = [];
@@ -443,6 +515,19 @@ function groupTextElementsIntoParagraphs(elements: FormattedTextElement[]): Form
     lines.push(currentLine);
   }
   
+  console.log(`Created ${lines.length} lines from ${elements.length} elements`);
+  
+  // Debug: Show Y position distribution
+  const yPositions = sortedElements.map(e => e.y).slice(0, 10);
+  console.log(`First 10 Y positions:`, yPositions);
+  
+  // Debug: Show line distribution
+  lines.slice(0, 5).forEach((line, index) => {
+    const yPos = line[0]?.y || 0;
+    const textPreview = line.map(e => e.text).join(' ').substring(0, 50);
+    console.log(`Line ${index + 1}: Y=${yPos}, Elements=${line.length}, Text="${textPreview}..."`);
+  });
+  
   // Group lines into paragraphs based on spacing and content
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -455,10 +540,17 @@ function groupTextElementsIntoParagraphs(elements: FormattedTextElement[]): Form
     const shouldBreakParagraph = 
       !nextLine || // Last line
       (nextLine && line.length > 0 && nextLine.length > 0 && 
-       Math.abs(nextLine[0].y - line[0].y) > 20) || // Large vertical gap
+       Math.abs(nextLine[0].y - line[0].y) > 10) || // Large vertical gap (further reduced)
       (nextLine && line.length > 0 && nextLine.length > 0 && 
        line[0].fontSize && nextLine[0].fontSize && 
-       Math.abs(line[0].fontSize - nextLine[0].fontSize) > 2); // Different font sizes
+       Math.abs(line[0].fontSize - nextLine[0].fontSize) > 2) || // Different font sizes
+      (nextLine && line.length > 0 && nextLine.length > 0 && 
+       line[0].x && nextLine[0].x && 
+       Math.abs(line[0].x - nextLine[0].x) > 20) || // Significant horizontal offset (indentation)
+      (nextLine && line.length > 0 && nextLine.length > 0 && 
+       isHeading(line) && !isHeading(nextLine)) || // Heading followed by regular text
+      (nextLine && line.length > 0 && nextLine.length > 0 && 
+       line.length > 20); // Long lines should break into new paragraphs
     
     if (shouldBreakParagraph) {
       if (currentParagraph.length > 0) {
@@ -475,7 +567,105 @@ function groupTextElementsIntoParagraphs(elements: FormattedTextElement[]): Form
   
   console.log(`Grouped ${elements.length} elements into ${lines.length} lines and ${paragraphs.length} paragraphs`);
   
+  // If we still have only one paragraph, force break it into smaller chunks
+  if (paragraphs.length === 1 && paragraphs[0].length > 50) {
+    console.log('Forcing paragraph breaks due to single large paragraph');
+    const forcedParagraphs: FormattedTextElement[][] = [];
+    const chunkSize = 50; // Break every 50 elements
+    
+    for (let i = 0; i < paragraphs[0].length; i += chunkSize) {
+      const chunk = paragraphs[0].slice(i, i + chunkSize);
+      if (chunk.length > 0) {
+        forcedParagraphs.push(chunk);
+      }
+    }
+    
+    console.log(`Forced break created ${forcedParagraphs.length} paragraphs`);
+    return forcedParagraphs;
+  }
+  
   return paragraphs;
+}
+
+// Helper function to detect if a line is likely a heading
+function isHeading(line: FormattedTextElement[]): boolean {
+  if (line.length === 0) return false;
+  
+  const element = line[0];
+  const text = element.text.trim();
+  
+  // Check for heading indicators
+  return (
+    (element.fontSize && element.fontSize > 14) || // Large font size
+    element.bold || // Bold text
+    text.length < 50 || // Short text
+    /^[A-Z\s]+$/.test(text) || // All caps
+    /^\d+\.?\s/.test(text) || // Numbered list
+    /^[IVX]+\.?\s/.test(text) || // Roman numerals
+    /^[a-z]\.\s/.test(text) || // Lettered list
+    /^[•\-\*]\s/.test(text) // Bullet points
+  );
+}
+
+// Helper function to create a simple Word document as fallback
+async function createSimpleWordDocument(pdfBuffer: Buffer): Promise<Buffer> {
+  try {
+    console.log('Creating simple fallback Word document...');
+    
+    const doc = new Document({
+      sections: [{
+        properties: {
+          page: {
+            margin: {
+              top: 720, // 0.5 inch
+              right: 720,
+              bottom: 720,
+              left: 720,
+            },
+          },
+        },
+        children: [
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: "PDF Content",
+                bold: true,
+                size: 24,
+              }),
+            ],
+            spacing: { after: 400 },
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: "This document was converted from a PDF file. The original formatting may not be preserved.",
+                size: 12,
+              }),
+            ],
+            spacing: { after: 200 },
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: "Please note: This is a basic text extraction. For better formatting preservation, please ensure LibreOffice is installed on the server.",
+                size: 12,
+                italics: true,
+              }),
+            ],
+            spacing: { after: 200 },
+          }),
+        ],
+      }],
+    });
+    
+    const buffer = await Packer.toBuffer(doc);
+    console.log(`Simple Word document created. Size: ${buffer.length} bytes`);
+    
+    return buffer;
+  } catch (error) {
+    console.error('Error creating simple Word document:', error);
+    throw new Error(`Failed to create fallback Word document: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 // Helper function to convert PDF to PowerPoint using formatted text extraction
