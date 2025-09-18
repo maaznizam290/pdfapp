@@ -6,3 +6,6 @@ app.post('/api/pdf/convert', async (req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="converted.pptx"');
   res.send(pptxBuffer); // pptxBuffer must be a Buffer!
 });
+
+
+//convert.js file hai ye api->pdf ma 
