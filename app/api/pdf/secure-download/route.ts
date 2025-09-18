@@ -52,7 +52,8 @@ export async function POST(request: NextRequest) {
       console.log(`[${requestId}] Step 4: Preparing secure download response with filename '${secureFilename}'.`);
       
       // Return the processed file with maximum security headers
-      return new NextResponse(new Uint8Array(resultBuffer), {
+      return new Response(new Uint8Array(resultBuffer), {
+        status: 200,
         headers: {
           'Content-Type': 'application/pdf',
           'Content-Disposition': `attachment; filename="${secureFilename}"`,

@@ -5,7 +5,7 @@ import Link from 'next/link';
 
 export default function PDFToPowerPointPage() {
   const [file, setFile] = useState<File | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isConverting, setIsConverting] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -34,22 +34,40 @@ export default function PDFToPowerPointPage() {
 
   const handleConvert = async () => {
     if (!file) return;
-    
-    setIsProcessing(true);
-    
-    // Simulate processing
-    setTimeout(() => {
-      setIsProcessing(false);
-      // Here you would implement actual PDF to PowerPoint conversion logic
-      // Create a download link for the converted PowerPoint presentation
-      const link = document.createElement('a');
-      link.href = 'data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,UEsDBBQAAAAIAAeC2lQAAAAAAAAAAAAAAAAJAAAAeGwvUEsDBBQAAAAIAAeC2lQAAAAAAAAAAAAAAAAKAAAAeGwvX3JlbHMvUEsDBBQAAAAIAAeC2lQAAAAAAAAAAAAAAAALAAAAeGwvX3JlbHMvX3JlbC5yZWxQSwECFAMUAAAACAAHgtpUAAAAAAAAAAAAAAAACQAAAAAAAAAAABAA7QEAAAAAeGwvUEsBAhQDFAAAAAgAB4LaVAAAAAAAAAAAAAAAAAoAAAAAAAAAAAAQAAAAAAAAAAB4bC9fcmVscy9QSwECFAMUAAAACAAHgtpUAAAAAAAAAAAAAAAACwAAAAAAAAAAABAA7QH4bC9fcmVscy9fcmVsLnJlbFBLAQIUABQAAAAIAAeC2lQAAAAAAAAAAAAAAAACQAAAAAAAAAAAAQAAAAAAAAAAB4bC9QSwUGAAAAAAMAAwD9AAAAAA==';
-      link.download = 'converted-presentation.pptx';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      alert('PDF converted to PowerPoint successfully! Download started.');
-    }, 2000);
+    setIsConverting(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/pdf/convert', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        alert('Conversion failed: ' + (errorData.error || 'Unknown error'));
+        setIsConverting(false);
+        return;
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'converted-presentation.pptx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setIsConverting(false);
+      alert('Conversion successful! Your PowerPoint file has been downloaded.');
+    } catch (error) {
+      alert('Conversion failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      setIsConverting(false);
+    }
   };
 
   return (
@@ -132,17 +150,10 @@ export default function PDFToPowerPointPage() {
           <div className="mt-8 text-center">
             <button
               onClick={handleConvert}
-              disabled={isProcessing}
+              disabled={!file || isConverting}
               className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
             >
-              {isProcessing ? (
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  Converting to PowerPoint...
-                </div>
-              ) : (
-                'Convert to PowerPoint'
-              )}
+              {isConverting ? 'Converting...' : 'Convert to PowerPoint'}
             </button>
           </div>
         )}
@@ -178,3 +189,9 @@ export default function PDFToPowerPointPage() {
     </div>
   );
 }
+
+export const config = {
+  experimental: {
+    serverActions: true,
+  },
+};

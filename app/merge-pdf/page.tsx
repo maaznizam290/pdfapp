@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react';
 import Link from 'next/link';
-import { processMultipleFiles, downloadFile } from '@/utils/pdfApi';
+import { downloadFile } from '@/utils/pdfApi';
 import SuccessModal from '@/components/success-modal';
 
 export default function MergePDFPage() {
@@ -60,20 +60,15 @@ export default function MergePDFPage() {
       alert('Please select at least 2 PDF files to merge.');
       return;
     }
-    
+
     setIsProcessing(true);
-    
+
     try {
       console.log('Starting merge process with files:', files.map(f => ({ name: f.name, size: f.size })));
-      
-      // Use fetch with proper error handling
+
       const formData = new FormData();
       formData.append('operation', 'merge');
-      
-      files.forEach((file, index) => {
-        console.log(`Adding file ${index + 1}: ${file.name} (${file.size} bytes)`);
-        formData.append('files', file);
-      });
+      files.forEach(file => formData.append('files', file));
 
       const response = await fetch('/api/pdf/secure-download', {
         method: 'POST',
@@ -86,46 +81,25 @@ export default function MergePDFPage() {
         throw new Error(errorData.error || 'Failed to merge PDFs');
       }
 
-      // Get the blob from response
       const blob = await response.blob();
       console.log('Merge successful, blob size:', blob.size);
-      
+
       if (blob.size === 0) {
         throw new Error('Generated PDF is empty');
       }
-      
-      // Create a data URL instead of blob URL for better security
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        const dataUrl = e.target?.result as string;
-        const fileName = `merged-document-${new Date().toISOString().slice(0, 10)}.pdf`;
-        
-        // Create download link with data URL
-        const link = document.createElement('a');
-        link.href = dataUrl;
-        link.download = fileName;
-        link.style.display = 'none';
-        link.setAttribute('download', fileName);
-        
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      };
-      
-      reader.readAsDataURL(blob);
-      
-      // Set success modal data for confirmation
+
+      // Use Blob URL for binary download
       const fileName = `merged-document-${new Date().toISOString().slice(0, 10)}.pdf`;
-      
+      downloadFile(blob, fileName, 'application/pdf');
+
       setProcessedFileInfo({
         fileName,
         fileSize: blob.size,
-        downloadUrl: '' // No longer needed since we downloaded directly
+        downloadUrl: '' // Not needed, download handled directly
       });
-      
-      // Show success modal
+
       setShowSuccessModal(true);
-      
+
     } catch (error) {
       console.error('Error merging PDFs:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -329,13 +303,35 @@ export default function MergePDFPage() {
             }
             setProcessedFileInfo(null);
           }}
-          title="PDFs Merged Successfully!"
-          message={`Your ${files.length} PDF files have been successfully merged into a single document.`}
-          fileName={processedFileInfo.fileName}
-          fileSize={processedFileInfo.fileSize}
-          downloadUrl={processedFileInfo.downloadUrl}
+          fileInfo={processedFileInfo}
         />
       )}
     </div>
   );
 }
+
+// Example usage after conversion
+// import { downloadFile } from '@/utils/pdfApi';
+
+// After receiving the blob from the API:
+// const pptxFileName = `converted-${Date.now()}.pptx`;
+// downloadFile(
+//   blob,
+//   pptxFileName,
+//   'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+// );
+
+// Example for sending a pptx file
+// res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+// res.setHeader('Content-Disposition', 'attachment; filename="converted.pptx"');
+// res.send(pptxBuffer); // pptxBuffer must be a Buffer, not a string!
+
+// Node.js/Express example for sending a PDF or PPTX
+// app.post('/api/pdf/secure-download', async (req, res) => {
+//   // ...merge or convert logic...
+//   // Assume resultBuffer is a Buffer containing the binary file
+
+//   res.setHeader('Content-Type', 'application/pdf'); // or pptx MIME type
+//   res.setHeader('Content-Disposition', 'attachment; filename="merged.pdf"'); // or "converted.pptx"
+//   res.send(resultBuffer); // resultBuffer must be a Buffer!
+// });
