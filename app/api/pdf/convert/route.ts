@@ -31,6 +31,31 @@ const CONVERSION_ENDPOINTS: Record<string, { endpoint: string; contentType: stri
     endpoint: 'pdf/to/webp',
     contentType: 'application/zip',
     filename: 'converted-images.zip'
+  },
+  'word-to-pdf': {
+    endpoint: 'docx/to/pdf',
+    contentType: 'application/pdf',
+    filename: 'converted-document.pdf'
+  },
+  'excel-to-pdf': {
+    endpoint: 'xlsx/to/pdf',
+    contentType: 'application/pdf',
+    filename: 'converted-spreadsheet.pdf'
+  },
+  'powerpoint-to-pdf': {
+    endpoint: 'pptx/to/pdf',
+    contentType: 'application/pdf',
+    filename: 'converted-presentation.pdf'
+  },
+  'jpg-to-pdf': {
+    endpoint: 'jpg/to/pdf',
+    contentType: 'application/pdf',
+    filename: 'converted-images.pdf'
+  },
+  'html-to-pdf': {
+    endpoint: 'html/to/pdf',
+    contentType: 'application/pdf',
+    filename: 'converted-document.pdf'
   }
 };
 
@@ -70,12 +95,96 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // File type validation
-    if (file.type !== 'application/pdf') {
-      return NextResponse.json({ 
-        error: 'Invalid file type. Please upload a PDF file.',
-        code: 'INVALID_FILE_TYPE'
-      }, { status: 400 });
+    // File type validation based on operation
+    if (operation === 'word-to-pdf') {
+      // For Word to PDF conversion, accept Word documents
+      const validWordTypes = [
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/msword'
+      ];
+      const isValidWordFile = validWordTypes.includes(file.type) || 
+                             file.name.toLowerCase().endsWith('.doc') || 
+                             file.name.toLowerCase().endsWith('.docx');
+      
+      if (!isValidWordFile) {
+        return NextResponse.json({ 
+          error: 'Invalid file type. Please upload a Word document (.doc or .docx).',
+          code: 'INVALID_FILE_TYPE'
+        }, { status: 400 });
+      }
+    } else if (operation === 'excel-to-pdf') {
+      // For Excel to PDF conversion, accept Excel documents
+      const validExcelTypes = [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel'
+      ];
+      const isValidExcelFile = validExcelTypes.includes(file.type) || 
+                              file.name.toLowerCase().endsWith('.xls') || 
+                              file.name.toLowerCase().endsWith('.xlsx');
+      
+      if (!isValidExcelFile) {
+        return NextResponse.json({ 
+          error: 'Invalid file type. Please upload an Excel document (.xls or .xlsx).',
+          code: 'INVALID_FILE_TYPE'
+        }, { status: 400 });
+      }
+    } else if (operation === 'powerpoint-to-pdf') {
+      // For PowerPoint to PDF conversion, accept PowerPoint documents
+      const validPowerPointTypes = [
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.ms-powerpoint'
+      ];
+      const isValidPowerPointFile = validPowerPointTypes.includes(file.type) || 
+                                   file.name.toLowerCase().endsWith('.ppt') || 
+                                   file.name.toLowerCase().endsWith('.pptx');
+      
+      if (!isValidPowerPointFile) {
+        return NextResponse.json({ 
+          error: 'Invalid file type. Please upload a PowerPoint document (.ppt or .pptx).',
+          code: 'INVALID_FILE_TYPE'
+        }, { status: 400 });
+      }
+    } else if (operation === 'jpg-to-pdf') {
+      // For JPG to PDF conversion, accept image files
+      const validImageTypes = [
+        'image/jpeg',
+        'image/jpg',
+        'image/png',
+        'image/webp'
+      ];
+      const isValidImageFile = validImageTypes.includes(file.type) || 
+                              file.name.toLowerCase().match(/\.(jpg|jpeg|png|webp)$/);
+      
+      if (!isValidImageFile) {
+        return NextResponse.json({ 
+          error: 'Invalid file type. Please upload an image file (.jpg, .jpeg, .png, or .webp).',
+          code: 'INVALID_FILE_TYPE'
+        }, { status: 400 });
+      }
+    } else if (operation === 'html-to-pdf') {
+      // For HTML to PDF conversion, accept HTML files
+      const validHtmlTypes = [
+        'text/html',
+        'application/xhtml+xml'
+      ];
+      const isValidHtmlFile = validHtmlTypes.includes(file.type) || 
+                             file.name.toLowerCase().endsWith('.html') || 
+                             file.name.toLowerCase().endsWith('.htm');
+      
+      if (!isValidHtmlFile) {
+        return NextResponse.json({ 
+          error: 'Invalid file type. Please upload an HTML file (.html or .htm).',
+          code: 'INVALID_FILE_TYPE'
+        }, { status: 400 });
+      }
+    } else {
+      // For all other operations, require PDF files
+      if (file.type !== 'application/pdf') {
+        return NextResponse.json({ 
+          error: 'Invalid file type. Please upload a PDF file.',
+          code: 'INVALID_FILE_TYPE'
+        }, { status: 400 });
+      }
     }
 
     const conversionConfig = CONVERSION_ENDPOINTS[operation];
@@ -135,6 +244,51 @@ export async function POST(request: NextRequest) {
         // Add additional ConvertAPI parameters for image conversion
         convertFormData.append('StoreFile', 'true');
         convertFormData.append('ImageFormat', imageFormat.toUpperCase());
+      }
+      
+      // Add conversion options for Office to PDF conversions
+      if (operation === 'word-to-pdf' || operation === 'excel-to-pdf' || operation === 'powerpoint-to-pdf') {
+        convertFormData.append('StoreFile', 'true');
+        
+        // Add PDF quality settings if provided
+        if (options.quality) {
+          const qualityMap: Record<string, string> = { 
+            low: 'screen', 
+            medium: 'ebook', 
+            high: 'printer' 
+          };
+          convertFormData.append('PdfQuality', qualityMap[options.quality] || 'ebook');
+        }
+      }
+      
+      // Add conversion options for image to PDF conversions
+      if (operation === 'jpg-to-pdf') {
+        convertFormData.append('StoreFile', 'true');
+        
+        // Add PDF quality settings if provided
+        if (options.quality) {
+          const qualityMap: Record<string, string> = { 
+            low: 'screen', 
+            medium: 'ebook', 
+            high: 'printer' 
+          };
+          convertFormData.append('PdfQuality', qualityMap[options.quality] || 'ebook');
+        }
+      }
+      
+      // Add conversion options for HTML to PDF conversions
+      if (operation === 'html-to-pdf') {
+        convertFormData.append('StoreFile', 'true');
+        
+        // Add PDF quality settings if provided
+        if (options.quality) {
+          const qualityMap: Record<string, string> = { 
+            low: 'screen', 
+            medium: 'ebook', 
+            high: 'printer' 
+          };
+          convertFormData.append('PdfQuality', qualityMap[options.quality] || 'ebook');
+        }
       }
 
     // Convert PDF using ConvertAPI
