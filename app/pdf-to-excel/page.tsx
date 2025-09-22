@@ -80,17 +80,39 @@ export default function PDFToExcelPage() {
       // Get the converted file as a blob
       const blob = await response.blob();
       
+      // Create a secure download with proper MIME type
+      const secureBlob = new Blob([blob], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      });
+      
       // Create a secure download link
-      const url = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(secureBlob);
       const link = document.createElement('a');
       link.href = url;
       link.download = 'converted-spreadsheet.xlsx';
+      link.style.display = 'none';
+      
+      // Add security attributes
+      link.setAttribute('rel', 'noopener noreferrer');
+      link.setAttribute('target', '_blank');
+      
       document.body.appendChild(link);
-      link.click();
+      
+      // Use a more secure download method
+      try {
+        link.click();
+      } catch (downloadError) {
+        console.warn('Direct download failed, trying alternative method:', downloadError);
+        // Fallback: open in new tab
+        window.open(url, '_blank');
+      }
+      
       document.body.removeChild(link);
       
-      // Clean up the object URL
-      URL.revokeObjectURL(url);
+      // Clean up the object URL after a delay
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+      }, 1000);
       
       alert('PDF converted to Excel successfully! Download started.');
     } catch (error) {
