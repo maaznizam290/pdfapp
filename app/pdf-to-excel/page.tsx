@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 
 export default function PDFToExcelPage() {
@@ -8,6 +8,22 @@ export default function PDFToExcelPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Suppress browser extension errors
+  useEffect(() => {
+    const originalError = console.error;
+    console.error = (...args) => {
+      // Suppress contentScript.js errors from browser extensions
+      if (args[0] && typeof args[0] === 'string' && args[0].includes('contentScript.js')) {
+        return;
+      }
+      originalError.apply(console, args);
+    };
+
+    return () => {
+      console.error = originalError;
+    };
+  }, []);
 
   const handleFileSelect = (selectedFile: File | null) => {
     if (selectedFile && selectedFile.type === 'application/pdf') {
@@ -37,19 +53,57 @@ export default function PDFToExcelPage() {
     
     setIsProcessing(true);
     
-    // Simulate processing
-    setTimeout(() => {
-      setIsProcessing(false);
-      // Here you would implement actual PDF to Excel conversion logic
-      // Create a download link for the converted Excel spreadsheet
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('operation', 'pdf-to-excel');
+
+      const apiUrl = `${window.location.origin}/api/pdf/convert`;
+      console.log('Making request to:', apiUrl);
+      console.log('Current origin:', window.location.origin);
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        if (errorData.code === 'NO_TABLES_FOUND') {
+          alert('This PDF does not contain extractable tables. PDF to Excel conversion works best with PDFs that contain structured data in table format. Please try with a PDF that has tables or structured data.');
+        } else {
+          throw new Error(errorData.error || 'Conversion failed');
+        }
+        return;
+      }
+
+      // Get the converted file as a blob
+      const blob = await response.blob();
+      
+      // Create a secure download link
+      const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,UEsDBBQAAAAIAAeC2lQAAAAAAAAAAAAAAAAJAAAAeGwvUEsDBBQAAAAIAAeC2lQAAAAAAAAAAAAAAAAKAAAAeGwvX3JlbHMvUEsDBBQAAAAIAAeC2lQAAAAAAAAAAAAAAAALAAAAeGwvX3JlbHMvX3JlbC5yZWxQSwECFAMUAAAACAAHgtpUAAAAAAAAAAAAAAAACQAAAAAAAAAAABAA7QEAAAAAeGwvUEsBAhQDFAAAAAgAB4LaVAAAAAAAAAAAAAAAAAoAAAAAAAAAAAAQAAAAAAAAAAB4bC9fcmVscy9QSwECFAMUAAAACAAHgtpUAAAAAAAAAAAAAAAACwAAAAAAAAAAABAA7QH4bC9fcmVscy9fcmVsLnJlbFBLAQIUABQAAAAIAAeC2lQAAAAAAAAAAAAAAAACQAAAAAAAAAAAAQAAAAAAAAAAB4bC9QSwUGAAAAAAMAAwD9AAAAAA==';
+      link.href = url;
       link.download = 'converted-spreadsheet.xlsx';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      
+      // Clean up the object URL
+      URL.revokeObjectURL(url);
+      
       alert('PDF converted to Excel successfully! Download started.');
-    }, 2000);
+    } catch (error) {
+      console.error('Conversion error:', error);
+      // Check if it's a network error (wrong port)
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        alert('Network error: Unable to connect to the server. Please check if the development server is running on the correct port.');
+      } else {
+        alert(`Conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -171,6 +225,30 @@ export default function PDFToExcelPage() {
               </div>
               <h4 className="font-medium text-gray-900 mb-2">Download result</h4>
               <p className="text-sm text-gray-600">Download your Excel spreadsheet</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Important Note */}
+        <div className="mt-8 bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-yellow-800">Important Note</h3>
+              <div className="mt-2 text-sm text-yellow-700">
+                <p>PDF to Excel conversion works best with PDFs that contain:</p>
+                <ul className="list-disc list-inside mt-2 space-y-1">
+                  <li>Structured tables and data</li>
+                  <li>Financial reports with tabular data</li>
+                  <li>Spreadsheets exported as PDF</li>
+                  <li>Forms with structured fields</li>
+                </ul>
+                <p className="mt-2">PDFs with only text or images may not convert properly to Excel format.</p>
+              </div>
             </div>
           </div>
         </div>

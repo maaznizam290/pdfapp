@@ -39,6 +39,7 @@ export default function PDFToPowerPointPage() {
     try {
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('operation', 'pdf-to-ppt');
 
       const response = await fetch('/api/pdf/convert', {
         method: 'POST',
