@@ -110,6 +110,9 @@ export default function PDFToJPGPage() {
       clearInterval(progressInterval);
       setProgress(100);
 
+      console.log('Response status:', response.status);
+      console.log('Response ok:', response.ok);
+
       if (!response.ok) {
         const errorData = await response.json();
         
@@ -137,6 +140,11 @@ export default function PDFToJPGPage() {
         size: blob.size,
         type: blob.type
       });
+      
+      // Check if blob is empty or invalid
+      if (blob.size === 0) {
+        throw new Error('Received empty file from server');
+      }
       
       // Check the actual content type from the response
       const contentType = response.headers.get('content-type') || '';
@@ -231,7 +239,7 @@ export default function PDFToJPGPage() {
       }, 2000);
       
             const successMessage = isZipFile 
-              ? `PDF converted to ${extension.toUpperCase()} images successfully! ${result.Files?.length || 'Multiple'} pages downloaded as ZIP file.`
+              ? `PDF converted to ${extension.toUpperCase()} images successfully! Multiple pages downloaded as ZIP file.`
               : isImageFile 
                 ? `PDF converted to ${extension.toUpperCase()} successfully! Download started.`
                 : conversionOptions.extractMode === 'pages' 
@@ -384,7 +392,7 @@ export default function PDFToJPGPage() {
                          </select>
                          {conversionOptions.outputFormat === 'png' && (
                            <p className="text-xs text-gray-500 mt-1">
-                             PNG is lossless - quality affects compression, not image quality
+                             PNG is lossless - compression may not significantly affect file size
                            </p>
                          )}
                        </div>

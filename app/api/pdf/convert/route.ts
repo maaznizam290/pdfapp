@@ -120,11 +120,16 @@ export async function POST(request: NextRequest) {
           convertFormData.append('ExtractImages', 'true');
         }
         
-        // Add compression settings for PNG (lossless but can control compression level)
+        // Add compression settings for PNG (try different parameter names)
         if (imageFormat === 'png') {
-          // PNG compression level (0-9, where 9 is maximum compression)
+          // Try different PNG compression parameters that ConvertAPI might support
           const compressionMap: Record<string, number> = { low: 1, medium: 5, high: 9 };
-          convertFormData.append('ImageCompression', (compressionMap[options.quality] || 5).toString());
+          const compressionLevel = compressionMap[options.quality] || 5;
+          
+          // Try multiple parameter names that ConvertAPI might support
+          convertFormData.append('CompressionLevel', compressionLevel.toString());
+          convertFormData.append('PNGCompression', compressionLevel.toString());
+          convertFormData.append('ImageCompression', compressionLevel.toString());
         }
         
         // Add additional ConvertAPI parameters for image conversion
@@ -137,6 +142,13 @@ export async function POST(request: NextRequest) {
     console.log('ConvertAPI URL:', convertApiUrl);
     console.log('Operation:', operation);
     console.log('Options:', options);
+    
+    // Debug: Log all FormData entries
+    console.log('FormData entries:');
+    const formDataEntries = Array.from(convertFormData.entries());
+    formDataEntries.forEach(([key, value]) => {
+      console.log(`  ${key}: ${value}`);
+    });
     
     const response = await fetch(convertApiUrl, {
       method: 'POST',
