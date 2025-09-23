@@ -28,57 +28,57 @@ export default function HTMLToPDFPage() {
     try {
       console.log('Starting HTML to PDF conversion');
       
-      // For now, we'll create a simple HTML file and provide instructions
-      // In a real implementation, you'd use a service like Puppeteer or similar
+      // Create HTML file from content
       const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
-      const htmlUrl = URL.createObjectURL(htmlBlob);
+      const fileName = `html-content-${Date.now()}.html`;
       
-      // Create a simple instruction file
-      const instructions = `HTML to PDF Conversion Instructions
-
-Your HTML content has been prepared for conversion.
-
-To convert HTML to PDF:
-
-1. Open the HTML file in your browser
-2. Press Ctrl+P (or Cmd+P on Mac) to print
-3. Select "Save as PDF" as the destination
-4. Choose your preferred settings:
-   - Page size: ${pageSize}
-   - Orientation: ${orientation}
-   - Margins: ${margin}mm
-
-Alternative methods:
-- Use online HTML to PDF converters
-- Use browser extensions
-- Use professional PDF conversion tools
-
-HTML file size: ${htmlBlob.size} bytes
-Generated: ${new Date().toLocaleString()}`;
-
-      const instructionBlob = new Blob([instructions], { type: 'text/plain' });
-      const downloadUrl = URL.createObjectURL(instructionBlob);
-      const fileName = `html-to-pdf-instructions-${new Date().toISOString().slice(0, 10)}.txt`;
+      // Create FormData for the API
+      const formData = new FormData();
+      formData.append('file', htmlBlob, fileName);
+      formData.append('operation', 'html-to-pdf');
+      formData.append('options', JSON.stringify({
+        quality: 'high',
+        pageSize,
+        orientation,
+        margin: `${margin}mm`
+      }));
+      
+      // Call the conversion API
+      const response = await fetch('/api/pdf/convert', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      
+      // Get the converted PDF file
+      const pdfBlob = await response.blob();
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      
+      // Generate filename for download
+      const downloadFileName = `converted-document-${new Date().toISOString().slice(0, 10)}.pdf`;
       
       // Trigger download
       const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = fileName;
+      link.href = pdfUrl;
+      link.download = downloadFileName;
       link.style.display = 'none';
-      link.setAttribute('download', fileName);
+      link.setAttribute('download', downloadFileName);
       
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       
-      // Clean up URLs
-      URL.revokeObjectURL(downloadUrl);
-      URL.revokeObjectURL(htmlUrl);
+      // Clean up URL
+      URL.revokeObjectURL(pdfUrl);
       
       // Set success modal data
       setProcessedFileInfo({
-        fileName,
-        fileSize: instructionBlob.size,
+        fileName: downloadFileName,
+        fileSize: pdfBlob.size,
         downloadUrl: ''
       });
       
@@ -413,7 +413,7 @@ Example:
                 <span className="text-xl">3</span>
               </div>
               <h4 className="font-medium text-gray-900 mb-2">Convert and download</h4>
-              <p className="text-sm text-gray-600">Get conversion instructions</p>
+              <p className="text-sm text-gray-600">Get your PDF file instantly</p>
             </div>
           </div>
         </div>
@@ -427,8 +427,8 @@ Example:
             setShowSuccessModal(false);
             setProcessedFileInfo(null);
           }}
-          title="HTML to PDF Conversion Ready!"
-          message="Instructions for converting your HTML to PDF have been generated."
+          title="HTML to PDF Conversion Complete!"
+          message="Your HTML content has been successfully converted to PDF."
           fileName={processedFileInfo.fileName}
           fileSize={processedFileInfo.fileSize}
           downloadUrl={processedFileInfo.downloadUrl}
