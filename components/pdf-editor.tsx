@@ -17,6 +17,10 @@ interface TextElement {
   fontSize: number;
   color: string;
   page: number;
+  fontFamily: string;
+  fontWeight: 'normal' | 'bold';
+  fontStyle: 'normal' | 'italic';
+  textDecoration: 'none' | 'underline' | 'line-through';
 }
 
 interface ImageElement {
@@ -29,20 +33,56 @@ interface ImageElement {
   page: number;
 }
 
+interface AnnotationElement {
+  id: string;
+  type: 'highlight' | 'underline' | 'strikethrough' | 'sticky-note' | 'arrow' | 'rectangle' | 'circle';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  page: number;
+  color: string;
+  text?: string; // For sticky notes
+  startX?: number; // For lines/arrows
+  startY?: number;
+  endX?: number;
+  endY?: number;
+}
+
 export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
   const [pdfDoc, setPdfDoc] = useState<PDFDocument | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
-  const [editMode, setEditMode] = useState<'text' | 'image' | 'annotation'>('text');
+  const [editMode, setEditMode] = useState<'text' | 'image' | 'annotation' | 'form' | 'security'>('text');
   const [textElements, setTextElements] = useState<TextElement[]>([]);
   const [imageElements, setImageElements] = useState<ImageElement[]>([]);
+  const [annotationElements, setAnnotationElements] = useState<AnnotationElement[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [newText, setNewText] = useState('');
+  
+  // Text formatting options
   const [fontSize, setFontSize] = useState(12);
   const [textColor, setTextColor] = useState('#000000');
+  const [fontFamily, setFontFamily] = useState('Arial');
+  const [fontWeight, setFontWeight] = useState<'normal' | 'bold'>('normal');
+  const [fontStyle, setFontStyle] = useState<'normal' | 'italic'>('normal');
+  const [textDecoration, setTextDecoration] = useState<'none' | 'underline' | 'line-through'>('none');
+  
+  // Annotation options
+  const [annotationType, setAnnotationType] = useState<'highlight' | 'underline' | 'strikethrough' | 'sticky-note' | 'arrow' | 'rectangle' | 'circle'>('highlight');
+  const [annotationColor, setAnnotationColor] = useState('#ffff00');
   const [pdfUrl, setPdfUrl] = useState<string>('');
   const [zoom, setZoom] = useState(100);
   const [viewMode, setViewMode] = useState<'fit-width' | 'fit-page' | 'actual-size'>('fit-width');
+  
+  // Undo/Redo functionality
+  const [history, setHistory] = useState<TextElement[][]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  
+  // Drag functionality - simplified
+  const [draggedElement, setDraggedElement] = useState<string | null>(null);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -64,6 +104,83 @@ export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
     }
   }, [pdfUrl, currentPage, zoom, viewMode]);
 
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if (e.ctrlKey && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        redo();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [historyIndex, history]);
+
+  // Global mouse events for dragging
+  useEffect(() => {
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (draggedElement) {
+        e.preventDefault();
+        const deltaX = e.clientX - dragStart.x;
+        const deltaY = e.clientY - dragStart.y;
+        
+        const newElements = textElements.map(el => 
+          el.id === draggedElement 
+            ? { ...el, x: Math.max(0, el.x + deltaX), y: Math.max(0, el.y + deltaY) }
+            : el
+        );
+        setTextElements(newElements);
+        setDragStart({ x: e.clientX, y: e.clientY });
+      }
+    };
+
+    const handleGlobalMouseUp = (e: MouseEvent) => {
+      if (draggedElement) {
+        e.preventDefault();
+        setDraggedElement(null);
+        saveToHistory(textElements);
+      }
+    };
+
+    if (draggedElement) {
+      document.addEventListener('mousemove', handleGlobalMouseMove);
+      document.addEventListener('mouseup', handleGlobalMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleGlobalMouseMove);
+      document.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, [draggedElement, dragStart, textElements]);
+
+  // Save state to history
+  const saveToHistory = (newElements: TextElement[]) => {
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push([...newElements]);
+    setHistory(newHistory);
+    setHistoryIndex(newHistory.length - 1);
+  };
+
+  // Undo function
+  const undo = () => {
+    if (historyIndex > 0) {
+      setHistoryIndex(historyIndex - 1);
+      setTextElements([...history[historyIndex - 1]]);
+    }
+  };
+
+  // Redo function
+  const redo = () => {
+    if (historyIndex < history.length - 1) {
+      setHistoryIndex(historyIndex + 1);
+      setTextElements([...history[historyIndex + 1]]);
+    }
+  };
+
   const loadPDF = async () => {
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -77,31 +194,6 @@ export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
       setPdfUrl(url);
     } catch (error) {
       console.error('Error loading PDF:', error);
-    }
-  };
-
-  const handleCanvasClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isEditing) return;
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-
-    if (editMode === 'text' && newText.trim()) {
-      const newElement: TextElement = {
-        id: Date.now().toString(),
-        text: newText,
-        x,
-        y,
-        fontSize,
-        color: textColor,
-        page: currentPage,
-      };
-      setTextElements(prev => [...prev, newElement]);
-      setNewText('');
     }
   };
 
@@ -172,6 +264,15 @@ export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
     }
   };
 
+  // Enhanced drag functionality
+  const handleDragStart = (e: React.MouseEvent, elementId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggedElement(elementId);
+    setDragStart({ x: e.clientX, y: e.clientY });
+  };
+
+
   return (
     <div className="flex flex-col h-screen bg-gray-100">
       {/* Toolbar */}
@@ -241,6 +342,28 @@ export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
                 Actual Size
               </button>
             </div>
+
+            {/* Undo/Redo */}
+            {isEditing && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={undo}
+                  disabled={historyIndex <= 0}
+                  className={`px-2 py-1 rounded text-xs ${historyIndex <= 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  title="Undo (Ctrl+Z)"
+                >
+                  ↶ Undo
+                </button>
+                <button
+                  onClick={redo}
+                  disabled={historyIndex >= history.length - 1}
+                  className={`px-2 py-1 rounded text-xs ${historyIndex >= history.length - 1 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  title="Redo (Ctrl+Y)"
+                >
+                  ↷ Redo
+                </button>
+              </div>
+            )}
           </div>
           
           <div className="flex items-center gap-4">
@@ -264,6 +387,18 @@ export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
               >
                 ✍️ Annotation
               </button>
+              <button
+                onClick={() => setEditMode('form')}
+                className={`px-3 py-1 rounded text-sm ${editMode === 'form' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}
+              >
+                📋 Form
+              </button>
+              <button
+                onClick={() => setEditMode('security')}
+                className={`px-3 py-1 rounded text-sm ${editMode === 'security' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}
+              >
+                🔒 Security
+              </button>
             </div>
             
             <button
@@ -280,28 +415,73 @@ export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
       {isEditing && (
         <div className="bg-white border-b border-gray-200 p-4">
           {editMode === 'text' && (
-            <div className="flex items-center gap-4">
-              <input
-                type="text"
-                value={newText}
-                onChange={(e) => setNewText(e.target.value)}
-                placeholder="Enter text to add..."
-                className="px-3 py-2 border border-gray-300 rounded"
-              />
-              <input
-                type="number"
-                value={fontSize}
-                onChange={(e) => setFontSize(Number(e.target.value))}
-                className="w-20 px-3 py-2 border border-gray-300 rounded"
-                min="8"
-                max="72"
-              />
-              <input
-                type="color"
-                value={textColor}
-                onChange={(e) => setTextColor(e.target.value)}
-                className="w-12 h-10 border border-gray-300 rounded"
-              />
+            <div className="space-y-3">
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-gray-600">Click anywhere on the PDF to add text</span>
+              </div>
+              <div className="flex items-center gap-4 flex-wrap">
+                {/* Font Family */}
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-600">Font:</label>
+                  <select
+                    value={fontFamily}
+                    onChange={(e) => setFontFamily(e.target.value)}
+                    className="px-2 py-1 border border-gray-300 rounded text-sm"
+                  >
+                    <option value="Arial">Arial</option>
+                    <option value="Times New Roman">Times New Roman</option>
+                    <option value="Helvetica">Helvetica</option>
+                    <option value="Courier New">Courier New</option>
+                    <option value="Georgia">Georgia</option>
+                  </select>
+                </div>
+                
+                {/* Font Size */}
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-600">Size:</label>
+                  <input
+                    type="number"
+                    value={fontSize}
+                    onChange={(e) => setFontSize(Number(e.target.value))}
+                    className="w-16 px-2 py-1 border border-gray-300 rounded text-sm"
+                    min="8"
+                    max="72"
+                  />
+                </div>
+                
+                {/* Font Weight */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setFontWeight(fontWeight === 'bold' ? 'normal' : 'bold')}
+                    className={`px-2 py-1 rounded text-sm ${fontWeight === 'bold' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}
+                  >
+                    <strong>B</strong>
+                  </button>
+                  <button
+                    onClick={() => setFontStyle(fontStyle === 'italic' ? 'normal' : 'italic')}
+                    className={`px-2 py-1 rounded text-sm ${fontStyle === 'italic' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}
+                  >
+                    <em>I</em>
+                  </button>
+                  <button
+                    onClick={() => setTextDecoration(textDecoration === 'underline' ? 'none' : 'underline')}
+                    className={`px-2 py-1 rounded text-sm ${textDecoration === 'underline' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}
+                  >
+                    <u>U</u>
+                  </button>
+                </div>
+                
+                {/* Text Color */}
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-600">Color:</label>
+                  <input
+                    type="color"
+                    value={textColor}
+                    onChange={(e) => setTextColor(e.target.value)}
+                    className="w-8 h-8 border border-gray-300 rounded cursor-pointer"
+                  />
+                </div>
+              </div>
             </div>
           )}
           
@@ -322,48 +502,179 @@ export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
               </button>
             </div>
           )}
+          
+          {editMode === 'annotation' && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-gray-600">Click and drag on the PDF to add annotations</span>
+              </div>
+              <div className="flex items-center gap-4 flex-wrap">
+                {/* Annotation Type */}
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-600">Type:</label>
+                  <select
+                    value={annotationType}
+                    onChange={(e) => setAnnotationType(e.target.value as any)}
+                    className="px-2 py-1 border border-gray-300 rounded text-sm"
+                  >
+                    <option value="highlight">🖍️ Highlight</option>
+                    <option value="underline">📝 Underline</option>
+                    <option value="strikethrough">❌ Strikethrough</option>
+                    <option value="sticky-note">📌 Sticky Note</option>
+                    <option value="arrow">➡️ Arrow</option>
+                    <option value="rectangle">⬜ Rectangle</option>
+                    <option value="circle">⭕ Circle</option>
+                  </select>
+                </div>
+                
+                {/* Annotation Color */}
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-600">Color:</label>
+                  <input
+                    type="color"
+                    value={annotationColor}
+                    onChange={(e) => setAnnotationColor(e.target.value)}
+                    className="w-8 h-8 border border-gray-300 rounded cursor-pointer"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* PDF Viewer */}
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex-1 overflow-auto p-2">
         <div className="flex justify-center">
           {pdfUrl ? (
-            <div className="relative w-full max-w-6xl">
+            <div className="relative w-full max-w-7xl pdf-container">
               <iframe
                 ref={iframeRef}
                 src={`${pdfUrl}#toolbar=1&navpanes=1&scrollbar=1&page=${currentPage}&view=${viewMode === 'fit-width' ? 'FitH' : viewMode === 'fit-page' ? 'FitV' : 'Fit'}&zoom=${zoom}`}
                 width="100%"
-                height="800"
+                height="900"
                 className="border border-gray-300 shadow-lg rounded-lg"
-                style={{ minHeight: '600px' }}
+                style={{ minHeight: '700px' }}
                 title="PDF Document"
               />
-              {/* Overlay for editing */}
-              {isEditing && (
+              
+              {/* Interactive Text Box Overlay */}
+              {isEditing && editMode === 'text' && (
                 <div 
-                  className="absolute inset-0 cursor-crosshair z-10"
+                  className="absolute inset-0 z-10"
+                  style={{ 
+                    background: 'rgba(0,0,0,0.01)', // Almost transparent to detect clicks
+                    cursor: 'text'
+                  }}
                   onClick={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect();
                     const x = e.clientX - rect.left;
                     const y = e.clientY - rect.top;
                     
-                    if (editMode === 'text' && newText.trim()) {
-                      const newElement: TextElement = {
-                        id: Date.now().toString(),
-                        text: newText,
-                        x: x * 0.8, // Scale to match PDF size
-                        y: y * 0.8,
-                        fontSize,
-                        color: textColor,
-                        page: currentPage,
-                      };
-                      setTextElements(prev => [...prev, newElement]);
-                      setNewText('');
-                    }
+                    // Create text input box at click position
+                    const textBoxId = `textbox-${Date.now()}`;
+                    const newElement: TextElement = {
+                      id: textBoxId,
+                      text: '',
+                      x: x - 100, // Center the text box
+                      y: y - 15,
+                      fontSize,
+                      color: textColor,
+                      page: currentPage,
+                      fontFamily,
+                      fontWeight,
+                      fontStyle,
+                      textDecoration,
+                    };
+                    const newElements = [...textElements, newElement];
+                    setTextElements(newElements);
+                    saveToHistory(newElements);
+                    
+                    // Focus on the new text input
+                    setTimeout(() => {
+                      const textInput = document.getElementById(textBoxId) as HTMLInputElement;
+                      if (textInput) {
+                        textInput.focus();
+                      }
+                    }, 100);
                   }}
                 />
               )}
+              
+              {/* Render Text Elements */}
+              {textElements
+                .filter(element => element.page === currentPage)
+                .map((element) => (
+                  <div
+                    key={element.id}
+                    className="absolute z-20"
+                    style={{
+                      left: element.x,
+                      top: element.y,
+                    }}
+                  >
+                    {isEditing && editMode === 'text' ? (
+                      <div className="relative group">
+                        <input
+                          id={element.id}
+                          type="text"
+                          value={element.text}
+                          onChange={(e) => {
+                            const newElements = textElements.map(el => 
+                              el.id === element.id 
+                                ? { ...el, text: e.target.value }
+                                : el
+                            );
+                            setTextElements(newElements);
+                            saveToHistory(newElements);
+                          }}
+                          onBlur={() => {
+                            // Remove empty text elements
+                            if (!element.text.trim()) {
+                              const newElements = textElements.filter(el => el.id !== element.id);
+                              setTextElements(newElements);
+                              saveToHistory(newElements);
+                            }
+                          }}
+                          className="bg-transparent border-2 border-blue-400 border-dashed px-2 py-1 rounded text-sm focus:outline-none focus:border-blue-600 focus:bg-white focus:bg-opacity-90 w-full"
+                          style={{
+                            fontSize: `${element.fontSize}px`,
+                            color: element.color,
+                            minWidth: '100px',
+                            fontFamily: element.fontFamily,
+                            fontWeight: element.fontWeight,
+                            fontStyle: element.fontStyle,
+                            textDecoration: element.textDecoration
+                          }}
+                          placeholder="Type here..."
+                          autoFocus
+                        />
+                        {/* Enhanced drag handle */}
+                        <div 
+                          className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 rounded-full cursor-move opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                          onMouseDown={(e) => handleDragStart(e, element.id)}
+                          title="Drag to move"
+                        >
+                          <div className="w-2 h-2 bg-white rounded-full"></div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        className="text-sm px-2 py-1 bg-white bg-opacity-90 rounded border border-gray-300"
+                        style={{
+                          fontSize: `${element.fontSize}px`,
+                          color: element.color,
+                          fontFamily: element.fontFamily,
+                          fontWeight: element.fontWeight,
+                          fontStyle: element.fontStyle,
+                          textDecoration: element.textDecoration
+                        }}
+                      >
+                        {element.text}
+                      </div>
+                    )}
+                  </div>
+                ))}
             </div>
           ) : (
             <div className="flex items-center justify-center h-96 bg-gray-200 rounded-lg">
