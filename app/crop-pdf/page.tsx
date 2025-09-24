@@ -2,7 +2,6 @@
 
 import { useState, useRef } from 'react';
 import Link from 'next/link';
-import { processMultipleFiles } from '@/utils/pdfApi';
 import SuccessModal from '@/components/success-modal';
 
 export default function CropPDFPage() {
@@ -123,10 +122,27 @@ export default function CropPDFPage() {
         body: formData,
       });
 
+      console.log('Response status:', response.status);
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
       if (!response.ok) {
-        const errorData = await response.json();
-        console.error('API Error:', errorData);
-        throw new Error(errorData.error || 'Failed to crop PDF');
+        let errorMessage = 'Failed to crop PDF';
+        try {
+          const errorData = await response.json();
+          console.error('API Error:', errorData);
+          errorMessage = errorData.error || errorData.details || errorMessage;
+        } catch (jsonError) {
+          // If response is not JSON, try to get text
+          try {
+            const errorText = await response.text();
+            console.error('API Error Text:', errorText);
+            errorMessage = errorText || errorMessage;
+          } catch (textError) {
+            console.error('Could not parse error response:', textError);
+            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+          }
+        }
+        throw new Error(errorMessage);
       }
 
       const blob = await response.blob();

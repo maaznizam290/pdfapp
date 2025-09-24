@@ -252,7 +252,16 @@ async function cropPDF(inputPath: string, options: any): Promise<Buffer> {
     const { crop } = options;
     console.log('Crop options:', crop);
     
+    if (!crop) {
+      throw new Error('Crop options are required');
+    }
+    
     const { top, right, bottom, left, unit } = crop;
+    
+    // Validate crop values
+    if (top < 0 || right < 0 || bottom < 0 || left < 0) {
+      throw new Error('Crop values cannot be negative');
+    }
     
     // Convert units to points (PDF uses points as base unit)
     const conversionFactor = (() => {
@@ -275,14 +284,14 @@ async function cropPDF(inputPath: string, options: any): Promise<Buffer> {
     console.log('Processing', pages.length, 'pages');
     
     for (let i = 0; i < pages.length; i++) {
-      try {
-        console.log(`Processing page ${i + 1} (index ${i})`);
-        const page = pages[i];
-        const { width, height } = page.getSize();
-        
-        console.log(`Page ${i + 1}: ${width}x${height}`);
+      console.log(`Processing page ${i + 1} (index ${i})`);
+      const page = pages[i];
+      const { width, height } = page.getSize();
       
+      console.log(`Page ${i + 1}: ${width}x${height}`);
+    
       // Calculate new crop box
+      // PDF coordinates: (0,0) is bottom-left, (width, height) is top-right
       const newX = leftPt;
       const newY = bottomPt;
       const newWidth = Math.max(1, width - leftPt - rightPt);
@@ -299,18 +308,14 @@ async function cropPDF(inputPath: string, options: any): Promise<Buffer> {
       
       console.log(`Page ${i + 1} crop box: x=${newX}, y=${newY}, width=${newWidth}, height=${newHeight}`);
       
-        // Set crop box
-        page.setCropBox({
-          x: newX,
-          y: newY,
-          width: newWidth,
-          height: newHeight,
-        });
+      try {
+        // Set crop box using pdf-lib's approach
+        page.setCropBox(newX, newY, newWidth, newHeight);
         
         console.log(`Page ${i + 1} cropped successfully`);
-      } catch (pageError) {
-        console.error(`Error cropping page ${i + 1}:`, pageError);
-        throw new Error(`Failed to crop page ${i + 1}: ${pageError instanceof Error ? pageError.message : 'Unknown error'}`);
+      } catch (cropError) {
+        console.error(`Error setting crop box for page ${i + 1}:`, cropError);
+        throw new Error(`Failed to set crop box for page ${i + 1}: ${cropError instanceof Error ? cropError.message : 'Unknown error'}`);
       }
     }
 
