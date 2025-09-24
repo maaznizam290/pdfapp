@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import PDFEditorAPI from '@/utils/pdfEditorAPI';
 
 interface PDFEditorProps {
   file: File;
@@ -50,6 +51,9 @@ interface AnnotationElement {
 }
 
 export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
+  // PDF Editor API instance
+  const pdfAPI = useRef(new PDFEditorAPI());
+  
   const [pdfDoc, setPdfDoc] = useState<PDFDocument | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -183,70 +187,69 @@ export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
 
   const loadPDF = async () => {
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await PDFDocument.load(arrayBuffer);
-      setPdfDoc(pdf);
-      setTotalPages(pdf.getPageCount());
-      
-      // Create URL for iframe display
-      const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      setPdfUrl(url);
+      const success = await pdfAPI.current.openPDF(file);
+      if (success) {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await PDFDocument.load(arrayBuffer);
+        setPdfDoc(pdf);
+        setTotalPages(pdf.getPageCount());
+        
+        // Create URL for iframe display
+        const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        setPdfUrl(url);
+      }
     } catch (error) {
       console.error('Error loading PDF:', error);
     }
   };
 
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const imgSrc = e.target?.result as string;
-      const img = new Image();
-      img.onload = () => {
-        const newElement: ImageElement = {
-          id: Date.now().toString(),
-          src: imgSrc,
-          x: 100,
-          y: 100,
-          width: Math.min(img.width, 200),
-          height: Math.min(img.height, 200),
-          page: currentPage,
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const imgSrc = e.target?.result as string;
+        const img = new Image();
+        img.onload = async () => {
+          // Use API to insert image
+          const imageId = await pdfAPI.current.insertImage(
+            currentPage,
+            imgSrc,
+            { x: 100, y: 100 },
+            { width: Math.min(img.width, 200), height: Math.min(img.height, 200) }
+          );
+          
+          // Also add to local state for UI rendering
+          const newElement: ImageElement = {
+            id: imageId,
+            src: imgSrc,
+            x: 100,
+            y: 100,
+            width: Math.min(img.width, 200),
+            height: Math.min(img.height, 200),
+            page: currentPage,
+          };
+          setImageElements(prev => [...prev, newElement]);
         };
-        setImageElements(prev => [...prev, newElement]);
+        img.src = imgSrc;
       };
-      img.src = imgSrc;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('Error uploading image:', error);
+    }
   };
 
   const savePDF = async () => {
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const pdfDoc = await PDFDocument.load(arrayBuffer);
-      
-      // Add text elements to PDF
-      for (const element of textElements) {
-        const page = pdfDoc.getPage(element.page - 1);
-        const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-        
-        page.drawText(element.text, {
-          x: element.x,
-          y: page.getHeight() - element.y,
-          size: element.fontSize,
-          font: font,
-          color: rgb(
-            parseInt(element.color.slice(1, 3), 16) / 255,
-            parseInt(element.color.slice(3, 5), 16) / 255,
-            parseInt(element.color.slice(5, 7), 16) / 255
-          ),
-        });
+      const pdfBytes = await pdfAPI.current.savePDF();
+      if (pdfBytes) {
+        onSave(pdfBytes);
+      } else {
+        throw new Error('Failed to save PDF');
       }
-
-      const pdfBytes = await pdfDoc.save();
-      onSave(pdfBytes);
     } catch (error) {
       console.error('Error saving PDF:', error);
     }
@@ -361,6 +364,77 @@ export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
                   title="Redo (Ctrl+Y)"
                 >
                   ↷ Redo
+                </button>
+              </div>
+            )}
+
+            {/* Page Manipulation */}
+            {isEditing && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => {
+                    const newPageNumber = pdfAPI.current.addPage();
+                    setTotalPages(pdfAPI.current.getPageCount());
+                    console.log('Added page:', newPageNumber);
+                  }}
+                  className="px-2 py-1 bg-blue-200 hover:bg-blue-300 rounded text-xs"
+                  title="Add Page"
+                >
+                  ➕ Add Page
+                </button>
+                <button
+                  onClick={() => {
+                    if (totalPages > 1) {
+                      const success = pdfAPI.current.deletePage(currentPage);
+                      if (success) {
+                        setTotalPages(pdfAPI.current.getPageCount());
+                        if (currentPage > 1) {
+                          setCurrentPage(currentPage - 1);
+                        }
+                      }
+                    }
+                  }}
+                  disabled={totalPages <= 1}
+                  className={`px-2 py-1 rounded text-xs ${totalPages <= 1 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-red-200 hover:bg-red-300'}`}
+                  title="Delete Page"
+                >
+                  🗑️ Delete Page
+                </button>
+                <button
+                  onClick={() => {
+                    const success = pdfAPI.current.rotatePage(currentPage, 90);
+                    console.log('Rotated page:', success);
+                  }}
+                  className="px-2 py-1 bg-orange-200 hover:bg-orange-300 rounded text-xs"
+                  title="Rotate Page"
+                >
+                  🔄 Rotate
+                </button>
+              </div>
+            )}
+
+            {/* API Functions */}
+            {isEditing && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={async () => {
+                    const results = await pdfAPI.current.searchText('test');
+                    console.log('Search results:', results);
+                  }}
+                  className="px-2 py-1 bg-purple-200 hover:bg-purple-300 rounded text-xs"
+                  title="Search Text"
+                >
+                  🔍 Search
+                </button>
+                <button
+                  onClick={() => {
+                    const pageCount = pdfAPI.current.getPageCount();
+                    console.log('Page count:', pageCount);
+                  }}
+                  className="px-2 py-1 bg-green-200 hover:bg-green-300 rounded text-xs"
+                  title="Get Page Count"
+                >
+                  📄 Pages
                 </button>
               </div>
             )}
@@ -540,6 +614,116 @@ export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
               </div>
             </div>
           )}
+
+          {editMode === 'form' && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-gray-600">Form editing tools</span>
+              </div>
+              <div className="flex items-center gap-4 flex-wrap">
+                <button
+                  onClick={() => {
+                    const validation = pdfAPI.current.validateForm();
+                    console.log('Form validation:', validation);
+                    if (!validation.isValid) {
+                      alert('Form validation errors:\n' + validation.errors.join('\n'));
+                    } else {
+                      alert('Form is valid!');
+                    }
+                  }}
+                  className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+                >
+                  Validate Form
+                </button>
+                <button
+                  onClick={() => {
+                    const signatureId = pdfAPI.current.addSignature(
+                      { x: 100, y: 100 },
+                      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+                    );
+                    console.log('Added signature:', signatureId);
+                  }}
+                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                >
+                  Add Signature
+                </button>
+              </div>
+            </div>
+          )}
+
+          {editMode === 'security' && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-gray-600">Security and protection tools</span>
+              </div>
+              <div className="flex items-center gap-4 flex-wrap">
+                <button
+                  onClick={() => {
+                    const password = prompt('Enter password for PDF protection:');
+                    if (password) {
+                      const success = pdfAPI.current.addPassword(password);
+                      console.log('Password protection:', success);
+                    }
+                  }}
+                  className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+                >
+                  Add Password
+                </button>
+                <button
+                  onClick={() => {
+                    const watermarkText = prompt('Enter watermark text (or leave empty for "CONFIDENTIAL"):') || 'CONFIDENTIAL';
+                    const watermarkId = pdfAPI.current.addWatermark(
+                      watermarkText,
+                      { x: 50, y: 50 },
+                      0.3
+                    );
+                    console.log('Added watermark:', watermarkId);
+                    alert(`Watermark "${watermarkText}" added successfully! It will appear on all pages when you save the PDF.`);
+                  }}
+                  className="px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600"
+                >
+                  Add Text Watermark
+                </button>
+                <button
+                  onClick={() => {
+                    const fileInput = document.createElement('input');
+                    fileInput.type = 'file';
+                    fileInput.accept = 'image/*';
+                    fileInput.onchange = async (e) => {
+                      const file = (e.target as HTMLInputElement).files?.[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                          const imageData = e.target?.result as string;
+                          const watermarkId = pdfAPI.current.addWatermark(
+                            imageData,
+                            { x: 50, y: 50 },
+                            0.5
+                          );
+                          console.log('Added image watermark:', watermarkId);
+                          alert('Image watermark added successfully! It will appear on all pages when you save the PDF.');
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    };
+                    fileInput.click();
+                  }}
+                  className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600"
+                >
+                  Add Image Watermark
+                </button>
+                <button
+                  onClick={() => {
+                    const success = pdfAPI.current.restrictEditing();
+                    console.log('Editing restrictions:', success);
+                  }}
+                  className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+                >
+                  Restrict Editing
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -558,6 +742,56 @@ export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
                 title="PDF Document"
               />
               
+              {/* Interactive Annotation Overlay */}
+              {isEditing && editMode === 'annotation' && (
+                <div 
+                  className="absolute inset-0 z-10"
+                  style={{ 
+                    background: 'rgba(0,0,0,0.01)',
+                    cursor: 'crosshair'
+                  }}
+                  onMouseDown={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const startX = e.clientX - rect.left;
+                    const startY = e.clientY - rect.top;
+                    
+                    const handleMouseMove = (moveEvent: MouseEvent) => {
+                      const currentX = moveEvent.clientX - rect.left;
+                      const currentY = moveEvent.clientY - rect.top;
+                      
+                      // Create annotation based on type
+                      const annotationId = pdfAPI.current.addComment(
+                        currentPage,
+                        { x: Math.min(startX, currentX), y: Math.min(startY, currentY) },
+                        `Annotation ${annotationType}`,
+                        { width: Math.abs(currentX - startX), height: Math.abs(currentY - startY) }
+                      );
+                      
+                      // Add to local state for rendering
+                      const newAnnotation: AnnotationElement = {
+                        id: annotationId,
+                        type: annotationType,
+                        x: Math.min(startX, currentX),
+                        y: Math.min(startY, currentY),
+                        width: Math.abs(currentX - startX),
+                        height: Math.abs(currentY - startY),
+                        page: currentPage,
+                        color: annotationColor,
+                      };
+                      setAnnotationElements(prev => [...prev, newAnnotation]);
+                    };
+                    
+                    const handleMouseUp = () => {
+                      document.removeEventListener('mousemove', handleMouseMove);
+                      document.removeEventListener('mouseup', handleMouseUp);
+                    };
+                    
+                    document.addEventListener('mousemove', handleMouseMove);
+                    document.addEventListener('mouseup', handleMouseUp);
+                  }}
+                />
+              )}
+
               {/* Interactive Text Box Overlay */}
               {isEditing && editMode === 'text' && (
                 <div 
@@ -571,12 +805,27 @@ export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
                     const x = e.clientX - rect.left;
                     const y = e.clientY - rect.top;
                     
-                    // Create text input box at click position
-                    const textBoxId = `textbox-${Date.now()}`;
+                    // Create text input box at click position using API
+                    const textBoxId = pdfAPI.current.addText(
+                      { x: x - 100, y: y - 15 },
+                      '',
+                      {
+                        family: fontFamily,
+                        size: fontSize,
+                        weight: fontWeight,
+                        style: fontStyle,
+                        color: textColor,
+                        underline: textDecoration === 'underline',
+                        strikethrough: textDecoration === 'line-through'
+                      },
+                      currentPage
+                    );
+                    
+                    // Also add to local state for UI rendering
                     const newElement: TextElement = {
                       id: textBoxId,
                       text: '',
-                      x: x - 100, // Center the text box
+                      x: x - 100,
                       y: y - 15,
                       fontSize,
                       color: textColor,
@@ -601,6 +850,149 @@ export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
                 />
               )}
               
+              {/* Render Image Elements */}
+              {imageElements
+                .filter(element => element.page === currentPage)
+                .map((element) => (
+                  <div
+                    key={element.id}
+                    className="absolute z-20"
+                    style={{
+                      left: element.x,
+                      top: element.y,
+                    }}
+                  >
+                    {isEditing && editMode === 'image' ? (
+                      <div className="relative group">
+                        <img
+                          src={element.src}
+                          alt="PDF Image"
+                          className="border-2 border-blue-400 border-dashed rounded"
+                          style={{
+                            width: element.width,
+                            height: element.height,
+                          }}
+                        />
+                        {/* Image resize handles */}
+                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full cursor-se-resize opacity-0 group-hover:opacity-100 transition-opacity"
+                          onMouseDown={(e) => {
+                            // Handle image resizing
+                            e.preventDefault();
+                            console.log('Resize image:', element.id);
+                          }}
+                        />
+                        {/* Image move handle */}
+                        <div className="absolute -top-1 -left-1 w-3 h-3 bg-green-500 rounded-full cursor-move opacity-0 group-hover:opacity-100 transition-opacity"
+                          onMouseDown={(e) => {
+                            // Handle image moving
+                            e.preventDefault();
+                            console.log('Move image:', element.id);
+                          }}
+                        />
+                        {/* Delete button */}
+                        <button
+                          className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                          onClick={() => {
+                            pdfAPI.current.deleteImage(element.id);
+                            setImageElements(prev => prev.filter(img => img.id !== element.id));
+                          }}
+                          title="Delete image"
+                        >
+                          <span className="text-white text-xs">×</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <img
+                        src={element.src}
+                        alt="PDF Image"
+                        className="rounded"
+                        style={{
+                          width: element.width,
+                          height: element.height,
+                        }}
+                      />
+                    )}
+                  </div>
+                ))}
+
+              {/* Render Annotation Elements */}
+              {annotationElements
+                .filter(element => element.page === currentPage)
+                .map((element) => (
+                  <div
+                    key={element.id}
+                    className="absolute z-15"
+                    style={{
+                      left: element.x,
+                      top: element.y,
+                      width: element.width,
+                      height: element.height,
+                    }}
+                  >
+                    {element.type === 'highlight' && (
+                      <div 
+                        className="absolute inset-0 bg-yellow-300 bg-opacity-50 rounded"
+                        style={{ backgroundColor: element.color + '50' }}
+                      />
+                    )}
+                    {element.type === 'underline' && (
+                      <div 
+                        className="absolute bottom-0 left-0 right-0 h-0.5"
+                        style={{ backgroundColor: element.color }}
+                      />
+                    )}
+                    {element.type === 'strikethrough' && (
+                      <div 
+                        className="absolute top-1/2 left-0 right-0 h-0.5"
+                        style={{ backgroundColor: element.color }}
+                      />
+                    )}
+                    {element.type === 'sticky-note' && (
+                      <div 
+                        className="absolute inset-0 bg-yellow-200 border border-yellow-400 rounded p-2 text-xs"
+                        style={{ backgroundColor: element.color + '80' }}
+                      >
+                        <div className="font-semibold">Note:</div>
+                        <div>{element.text || 'Click to edit'}</div>
+                        {isEditing && (
+                          <button
+                            className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-white text-xs flex items-center justify-center"
+                            onClick={() => {
+                              pdfAPI.current.deleteAnnotation(element.id);
+                              setAnnotationElements(prev => prev.filter(ann => ann.id !== element.id));
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {element.type === 'rectangle' && (
+                      <div 
+                        className="absolute inset-0 border-2 border-dashed rounded"
+                        style={{ borderColor: element.color }}
+                      />
+                    )}
+                    {element.type === 'circle' && (
+                      <div 
+                        className="absolute inset-0 border-2 border-dashed rounded-full"
+                        style={{ borderColor: element.color }}
+                      />
+                    )}
+                    {element.type === 'arrow' && (
+                      <div 
+                        className="absolute"
+                        style={{
+                          width: element.width,
+                          height: element.height,
+                          background: `linear-gradient(45deg, ${element.color} 0%, ${element.color} 100%)`,
+                          clipPath: 'polygon(0 0, 100% 50%, 0 100%)'
+                        }}
+                      />
+                    )}
+                  </div>
+                ))}
+
               {/* Render Text Elements */}
               {textElements
                 .filter(element => element.page === currentPage)
@@ -620,6 +1012,10 @@ export default function PDFEditor({ file, onSave, onCancel }: PDFEditorProps) {
                           type="text"
                           value={element.text}
                           onChange={(e) => {
+                            // Update via API
+                            pdfAPI.current.editText(currentPage, element.id, e.target.value);
+                            
+                            // Update local state
                             const newElements = textElements.map(el => 
                               el.id === element.id 
                                 ? { ...el, text: e.target.value }

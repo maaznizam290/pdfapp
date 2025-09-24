@@ -9,12 +9,49 @@ export default function RotatePDFPage() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [rotationAngle, setRotationAngle] = useState<90 | 180 | 270>(90);
   const [pageRange, setPageRange] = useState('');
+  const [pageRangeError, setPageRangeError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (selectedFile: File | null) => {
     if (selectedFile && selectedFile.type === 'application/pdf') {
       setFile(selectedFile);
+      setPageRangeError(''); // Clear any previous errors
     }
+  };
+
+  const validatePageRange = (range: string): boolean => {
+    if (!range.trim()) return true; // Empty range is valid (all pages)
+    
+    const pageNumbers = range.split(',').map(p => p.trim());
+    
+    for (const pageStr of pageNumbers) {
+      if (pageStr.includes('-')) {
+        // Handle ranges like "1-3"
+        const [start, end] = pageStr.split('-').map(n => n.trim());
+        const startNum = parseInt(start);
+        const endNum = parseInt(end);
+        
+        if (isNaN(startNum) || isNaN(endNum) || startNum < 1 || endNum < 1) {
+          setPageRangeError('Invalid page range format. Use numbers like "1-3"');
+          return false;
+        }
+        
+        if (startNum > endNum) {
+          setPageRangeError('Start page must be less than or equal to end page');
+          return false;
+        }
+      } else {
+        // Handle individual pages
+        const pageNum = parseInt(pageStr);
+        if (isNaN(pageNum) || pageNum < 1) {
+          setPageRangeError('Invalid page number. Use positive numbers like "1,3,5"');
+          return false;
+        }
+      }
+    }
+    
+    setPageRangeError('');
+    return true;
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -35,23 +72,84 @@ export default function RotatePDFPage() {
   };
 
   const handleRotate = async () => {
-    if (!file) return;
+    if (!file) {
+      alert('Please select a PDF file to rotate.');
+      return;
+    }
+    
+    // Validate page range
+    if (!validatePageRange(pageRange)) {
+      return;
+    }
     
     setIsProcessing(true);
     
-    // Simulate processing
-    setTimeout(() => {
-      setIsProcessing(false);
-      // Here you would implement actual PDF rotation logic
-      // Create a download link for the rotated PDF
+    try {
+      console.log('Starting rotate process with file:', { name: file.name, size: file.size });
+      
+      const options = {
+        angle: rotationAngle,
+        pageRange: pageRange.trim()
+      };
+      
+      // Use the correct API endpoint for single file operations
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('operation', 'rotate');
+      formData.append('options', JSON.stringify(options));
+
+      const response = await fetch('/api/pdf/process', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('API Error:', errorData);
+        throw new Error(errorData.error || 'Failed to rotate PDF');
+      }
+
+      const blob = await response.blob();
+      
+      console.log('Rotate successful, blob size:', blob.size);
+      
+      if (blob.size === 0) {
+        throw new Error('Generated PDF is empty');
+      }
+      
+      // Create a clean blob with proper MIME type
+      const cleanBlob = new Blob([blob], { 
+        type: 'application/pdf'
+      });
+      
+      // Create download URL
+      const downloadUrl = URL.createObjectURL(cleanBlob);
+      const fileName = `rotated-${rotationAngle}deg-${file.name}`;
+      
+      // Trigger immediate download
       const link = document.createElement('a');
-      link.href = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKL01lZGlhQm94IFswIDAgNTk1IDg0Ml0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovQ29udGVudHMgNCAwIFIKL1Jlc291cmNlcyA8PAovRm9udCA8PAovRjEgNSAwIFIKPj4KPj4KL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKFJvdGF0ZWQgUERGKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKFJvdGF0ZWQgUERGKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjEgMCBvYmoKPDwKZW5kb2JqCnhwcmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTAwIDAwMDAwIG4gCjAwMDAwMDAwNzkgMDAwMDAgbiAKMDAwMDAwMDE3MyAwMDAwMCBuIAowMDAwMDAwMzAxIDAwMDAwIG4gCjAwMDAwMDAzODAgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA2Ci9Sb290IDEgMCBSCi9JbmZvIDYgMCBSCj4+CnN0YXJ0eHJlZgo0OTIKJSVFT0Y=';
-      link.download = 'rotated-document.pdf';
+      link.href = downloadUrl;
+      link.download = fileName;
+      link.style.display = 'none';
+      link.setAttribute('download', fileName);
+      link.setAttribute('rel', 'noopener noreferrer');
+      
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      alert('PDF rotated successfully! Download started.');
-    }, 2000);
+      
+      // Clean up URL
+      URL.revokeObjectURL(downloadUrl);
+      
+      alert(`PDF rotated successfully! Downloaded ${fileName}`);
+      
+    } catch (error) {
+      console.error('Error rotating PDF:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      alert(`Failed to rotate PDF: ${errorMessage}. Please try again.`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -172,13 +270,22 @@ export default function RotatePDFPage() {
                 <input
                   type="text"
                   value={pageRange}
-                  onChange={(e) => setPageRange(e.target.value)}
+                  onChange={(e) => {
+                    setPageRange(e.target.value);
+                    validatePageRange(e.target.value);
+                  }}
                   placeholder="e.g., 1-3, 5, 7-9 (leave empty for all pages)"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                    pageRangeError ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                  }`}
                 />
-                <p className="text-sm text-gray-500 mt-2">
-                  Specify which pages to rotate. Leave empty to rotate all pages.
-                </p>
+                {pageRangeError ? (
+                  <p className="text-sm text-red-600 mt-2">{pageRangeError}</p>
+                ) : (
+                  <p className="text-sm text-gray-500 mt-2">
+                    Specify which pages to rotate. Leave empty to rotate all pages.
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -189,7 +296,7 @@ export default function RotatePDFPage() {
           <div className="mt-8 text-center">
             <button
               onClick={handleRotate}
-              disabled={isProcessing}
+              disabled={isProcessing || !!pageRangeError}
               className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
             >
               {isProcessing ? (

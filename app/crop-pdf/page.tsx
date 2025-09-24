@@ -22,12 +22,51 @@ export default function CropPDFPage() {
     left: 0,
     unit: 'mm'
   });
+  const [cropError, setCropError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (selectedFile: File | null) => {
     if (selectedFile && selectedFile.type === 'application/pdf') {
       setFile(selectedFile);
+      setCropError(''); // Clear any previous errors
     }
+  };
+
+  const validateCropSettings = (settings: typeof cropSettings): boolean => {
+    const { top, right, bottom, left, unit } = settings;
+    
+    // Check for negative values
+    if (top < 0 || right < 0 || bottom < 0 || left < 0) {
+      setCropError('Crop values cannot be negative');
+      return false;
+    }
+    
+    // Check for reasonable maximum values based on unit
+    const maxValue = (() => {
+      switch (unit) {
+        case 'mm': return 100; // 100mm max
+        case 'in': return 4; // 4 inches max
+        case 'pt': return 300; // 300 points max
+        default: return 100;
+      }
+    })();
+    
+    if (top > maxValue || right > maxValue || bottom > maxValue || left > maxValue) {
+      setCropError(`Crop values cannot exceed ${maxValue} ${unit}`);
+      return false;
+    }
+    
+    // Check if total crop would leave no content
+    const totalHorizontal = left + right;
+    const totalVertical = top + bottom;
+    
+    if (totalHorizontal > 200 || totalVertical > 200) {
+      setCropError('Total crop margins are too large and would remove all content');
+      return false;
+    }
+    
+    setCropError('');
+    return true;
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -56,6 +95,11 @@ export default function CropPDFPage() {
   const handleCrop = async () => {
     if (!file) {
       alert('Please select a PDF file to crop.');
+      return;
+    }
+    
+    // Validate crop settings
+    if (!validateCropSettings(cropSettings)) {
       return;
     }
     
@@ -282,7 +326,11 @@ export default function CropPDFPage() {
                 </label>
                 <select
                   value={cropSettings.unit}
-                  onChange={(e) => setCropSettings(prev => ({ ...prev, unit: e.target.value }))}
+                  onChange={(e) => {
+                    const newSettings = { ...cropSettings, unit: e.target.value };
+                    setCropSettings(newSettings);
+                    validateCropSettings(newSettings);
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="mm">Millimeters (mm)</option>
@@ -299,10 +347,14 @@ export default function CropPDFPage() {
                   <input
                     type="range"
                     min="0"
-                    max="50"
+                    max={cropSettings.unit === 'mm' ? 100 : cropSettings.unit === 'in' ? 4 : 300}
                     step="1"
                     value={cropSettings.top}
-                    onChange={(e) => setCropSettings(prev => ({ ...prev, top: parseInt(e.target.value) }))}
+                    onChange={(e) => {
+                      const newSettings = { ...cropSettings, top: parseInt(e.target.value) };
+                      setCropSettings(newSettings);
+                      validateCropSettings(newSettings);
+                    }}
                     className="w-full"
                   />
                 </div>
@@ -314,10 +366,14 @@ export default function CropPDFPage() {
                   <input
                     type="range"
                     min="0"
-                    max="50"
+                    max={cropSettings.unit === 'mm' ? 100 : cropSettings.unit === 'in' ? 4 : 300}
                     step="1"
                     value={cropSettings.right}
-                    onChange={(e) => setCropSettings(prev => ({ ...prev, right: parseInt(e.target.value) }))}
+                    onChange={(e) => {
+                      const newSettings = { ...cropSettings, right: parseInt(e.target.value) };
+                      setCropSettings(newSettings);
+                      validateCropSettings(newSettings);
+                    }}
                     className="w-full"
                   />
                 </div>
@@ -329,10 +385,14 @@ export default function CropPDFPage() {
                   <input
                     type="range"
                     min="0"
-                    max="50"
+                    max={cropSettings.unit === 'mm' ? 100 : cropSettings.unit === 'in' ? 4 : 300}
                     step="1"
                     value={cropSettings.bottom}
-                    onChange={(e) => setCropSettings(prev => ({ ...prev, bottom: parseInt(e.target.value) }))}
+                    onChange={(e) => {
+                      const newSettings = { ...cropSettings, bottom: parseInt(e.target.value) };
+                      setCropSettings(newSettings);
+                      validateCropSettings(newSettings);
+                    }}
                     className="w-full"
                   />
                 </div>
@@ -344,10 +404,14 @@ export default function CropPDFPage() {
                   <input
                     type="range"
                     min="0"
-                    max="50"
+                    max={cropSettings.unit === 'mm' ? 100 : cropSettings.unit === 'in' ? 4 : 300}
                     step="1"
                     value={cropSettings.left}
-                    onChange={(e) => setCropSettings(prev => ({ ...prev, left: parseInt(e.target.value) }))}
+                    onChange={(e) => {
+                      const newSettings = { ...cropSettings, left: parseInt(e.target.value) };
+                      setCropSettings(newSettings);
+                      validateCropSettings(newSettings);
+                    }}
                     className="w-full"
                   />
                 </div>
@@ -376,6 +440,13 @@ export default function CropPDFPage() {
                 Blue area shows what will be cropped out
               </p>
             </div>
+            
+            {/* Error Display */}
+            {cropError && (
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-sm text-red-600">{cropError}</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -384,7 +455,7 @@ export default function CropPDFPage() {
           <div className="mt-8 text-center">
             <button
               onClick={handleCrop}
-              disabled={isProcessing}
+              disabled={isProcessing || !!cropError}
               className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
             >
               {isProcessing ? (
