@@ -53,6 +53,17 @@ export async function convertFile(file: File, operation: string): Promise<Blob> 
 }
 
 /**
+ * Processes a single PDF file for various operations (split, extract, etc.).
+ * @param file The file to process.
+ * @param operation The operation to perform.
+ * @param options Additional options for the operation.
+ * @returns A promise that resolves with the processed file as a Blob.
+ */
+export async function processPDF(file: File, operation: string, options: any = {}): Promise<Blob> {
+  return processPDFs([file], operation, options);
+}
+
+/**
  * Processes PDF files for various operations (merge, split, extract, etc.).
  * @param files Array of files to process.
  * @param operation The operation to perform.

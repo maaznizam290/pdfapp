@@ -83,7 +83,7 @@ export default function RemovePagesPage() {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('operation', 'remove-pages');
-      formData.append('options', JSON.stringify({ pagesToRemove: selectedPages }));
+      formData.append('options', JSON.stringify({ pages: selectedPages }));
 
       const response = await fetch('/api/pdf/process', {
         method: 'POST',

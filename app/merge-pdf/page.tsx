@@ -64,21 +64,46 @@ export default function MergePDFPage() {
     setIsProcessing(true);
 
     try {
-      console.log('Starting merge process with files:', files.map(f => ({ name: f.name, size: f.size })));
+      console.log('Starting merge process with files:', files.map(f => ({ name: f.name, size: f.size, type: f.type })));
 
       const formData = new FormData();
       formData.append('operation', 'merge');
-      files.forEach(file => formData.append('files', file));
+      files.forEach((file, index) => {
+        console.log(`Adding file ${index + 1} to form data:`, file.name);
+        formData.append('files', file);
+      });
+      
+      console.log('Form data prepared, sending request...');
 
-      const response = await fetch('/api/pdf/secure-download', {
+      const response = await fetch('/api/pdf/process', {
         method: 'POST',
         body: formData,
       });
 
+      console.log('Response received:', {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries())
+      });
+
       if (!response.ok) {
-        const errorData = await response.json();
-        console.error('API Error:', errorData);
-        throw new Error(errorData.error || 'Failed to merge PDFs');
+        let errorMessage = 'Failed to merge PDFs';
+        try {
+          const errorData = await response.json();
+          console.error('API Error:', errorData);
+          errorMessage = errorData.error || errorData.details || errorMessage;
+        } catch (jsonError) {
+          // If response is not JSON, try to get text
+          try {
+            const errorText = await response.text();
+            console.error('API Error Text:', errorText);
+            errorMessage = errorText || errorMessage;
+          } catch (textError) {
+            console.error('Could not parse error response:', textError);
+            errorMessage = `Server error (${response.status}): ${response.statusText}`;
+          }
+        }
+        throw new Error(errorMessage);
       }
 
       const blob = await response.blob();

@@ -43,6 +43,33 @@ export default function SplitPDFPage() {
     handleFileSelect(droppedFile);
   };
 
+  const parsePageRange = (rangeStr: string): number[] => {
+    const pages: number[] = [];
+    const parts = rangeStr.split(',').map(part => part.trim());
+    
+    for (const part of parts) {
+      if (part.includes('-')) {
+        const [start, end] = part.split('-').map(Number);
+        if (start && end && start <= end) {
+          for (let i = start; i <= end; i++) {
+            pages.push(i);
+          }
+        } else {
+          throw new Error(`Invalid range format: ${part}. Use format like "1-5"`);
+        }
+      } else {
+        const pageNum = Number(part);
+        if (pageNum && pageNum > 0) {
+          pages.push(pageNum);
+        } else {
+          throw new Error(`Invalid page number: ${part}`);
+        }
+      }
+    }
+    
+    return pages.sort((a, b) => a - b);
+  };
+
   const handleSplit = async () => {
     if (!file) {
       alert('Please select a PDF file to split.');
@@ -55,25 +82,37 @@ export default function SplitPDFPage() {
       console.log('Starting PDF split with file:', { name: file.name, size: file.size });
       console.log('Split method:', splitMethod);
       
-      // Parse page range
-      let pageRangeOptions = {};
+      let options = {};
+      let operation = 'split';
       
       if (splitMethod === 'range' && pageRange) {
-        const [start, end] = pageRange.split('-').map(Number);
-        if (start && end) {
-          pageRangeOptions = { pageRange: { start, end } };
-          console.log('Page range options:', pageRangeOptions);
-        } else {
-          throw new Error('Invalid page range format. Please use format like "1-5"');
+        const pages = parsePageRange(pageRange);
+        if (pages.length === 0) {
+          throw new Error('Please specify valid page numbers');
         }
+        options = { pages };
+        operation = 'extract-pages';
+        console.log('Page range options:', options);
       } else if (splitMethod === 'every' && everyPages) {
-        pageRangeOptions = { everyPages };
-        console.log('Every pages options:', pageRangeOptions);
-      } else if (splitMethod === 'every' && !everyPages) {
-        throw new Error('Please specify how many pages to split by');
+        if (everyPages < 1) {
+          throw new Error('Please specify a valid number of pages (minimum 1)');
+        }
+        options = { everyPages };
+        operation = 'split';
+        console.log('Every pages options:', options);
+      } else if (splitMethod === 'extract' && pageRange) {
+        const pages = parsePageRange(pageRange);
+        if (pages.length === 0) {
+          throw new Error('Please specify valid page numbers to extract');
+        }
+        options = { pages };
+        operation = 'extract-pages';
+        console.log('Extract pages options:', options);
+      } else {
+        throw new Error('Please specify the split parameters');
       }
       
-      const blob = await processPDF(file, 'split', pageRangeOptions);
+      const blob = await processPDF(file, operation, options);
       console.log('Split successful, blob size:', blob.size);
       
       if (blob.size === 0) {

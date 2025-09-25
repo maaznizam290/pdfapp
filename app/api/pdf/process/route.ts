@@ -23,16 +23,49 @@ async function saveTempFile(buffer: Buffer): Promise<string> {
 
 // 📌 Merge PDFs
 async function mergePDFs(files: File[]): Promise<Buffer> {
-  const mergedPdf = await PDFDocument.create();
-
-  for (const file of files) {
-    const fileBuffer = await file.arrayBuffer();
-    const pdf = await PDFDocument.load(fileBuffer);
-    const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-    pages.forEach((page) => mergedPdf.addPage(page));
+  console.log('Starting merge operation with files:', files.map(f => ({ name: f.name, size: f.size, type: f.type })));
+  
+  if (files.length === 0) {
+    throw new Error('No files provided for merge operation');
   }
 
-  return Buffer.from(await mergedPdf.save());
+  const mergedPdf = await PDFDocument.create();
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`);
+    
+    try {
+      const fileBuffer = await file.arrayBuffer();
+      console.log(`File ${file.name} buffer size: ${fileBuffer.byteLength} bytes`);
+      
+      if (fileBuffer.byteLength === 0) {
+        throw new Error(`File "${file.name}" is empty`);
+      }
+      
+      const pdf = await PDFDocument.load(fileBuffer);
+      const pageCount = pdf.getPageCount();
+      console.log(`File ${file.name} has ${pageCount} pages`);
+      
+      if (pageCount === 0) {
+        throw new Error(`File "${file.name}" has no pages`);
+      }
+      
+      const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+      pages.forEach((page) => mergedPdf.addPage(page));
+      
+      console.log(`Successfully processed file ${file.name}`);
+    } catch (error) {
+      console.error(`Error processing file ${file.name}:`, error);
+      throw new Error(`Failed to process file "${file.name}": ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  console.log('All files processed, saving merged PDF...');
+  const result = Buffer.from(await mergedPdf.save());
+  console.log(`Merge completed successfully. Result size: ${result.length} bytes`);
+  
+  return result;
 }
 
 // 📌 Split PDF
@@ -41,12 +74,26 @@ async function splitPDF(inputPath: string, options: any): Promise<Buffer> {
   const pdf = await PDFDocument.load(pdfBytes);
   const newPdf = await PDFDocument.create();
 
-  const startPage = options.startPage || 1;
-  const endPage = options.endPage || pdf.getPageCount();
+  // Handle different split methods
+  if (options.everyPages) {
+    // Split every N pages
+    const everyPages = options.everyPages;
+    const totalPages = pdf.getPageCount();
+    
+    for (let i = 0; i < totalPages; i += everyPages) {
+      const endPage = Math.min(i + everyPages, totalPages);
+      const [page] = await newPdf.copyPages(pdf, [i]);
+      newPdf.addPage(page);
+    }
+  } else {
+    // Default: split by page range
+    const startPage = options.startPage || 1;
+    const endPage = options.endPage || pdf.getPageCount();
 
-  for (let i = startPage - 1; i < endPage; i++) {
-    const [page] = await newPdf.copyPages(pdf, [i]);
-    newPdf.addPage(page);
+    for (let i = startPage - 1; i < endPage; i++) {
+      const [page] = await newPdf.copyPages(pdf, [i]);
+      newPdf.addPage(page);
+    }
   }
 
   return Buffer.from(await newPdf.save());
@@ -86,6 +133,46 @@ async function removePages(inputPath: string, options: any): Promise<Buffer> {
   }
 
   return Buffer.from(await newPdf.save());
+}
+
+// 📌 Organize PDF (reorder pages and handle deletions)
+async function organizePDF(inputPath: string, options: any): Promise<Buffer> {
+  const pdfBytes = await readFile(inputPath);
+  const pdf = await PDFDocument.load(pdfBytes);
+  const newPdf = await PDFDocument.create();
+
+  const pageOrder = options.pageOrder || [];
+  const pagesToRemove = options.pagesToRemove || [];
+  const totalPages = pdf.getPageCount();
+
+  console.log('Organize PDF - Total pages:', totalPages);
+  console.log('Organize PDF - Page order:', pageOrder);
+  console.log('Organize PDF - Pages to remove:', pagesToRemove);
+
+  // If no specific order provided, keep original order but remove specified pages
+  if (pageOrder.length === 0) {
+    for (let i = 0; i < totalPages; i++) {
+      const pageNumber = i + 1;
+      // Skip pages that are marked for removal
+      if (!pagesToRemove.includes(pageNumber)) {
+        const [page] = await newPdf.copyPages(pdf, [i]);
+        newPdf.addPage(page);
+      }
+    }
+  } else {
+    // Use provided page order (this handles both reordering and deletion)
+    for (const pageNum of pageOrder) {
+      if (pageNum >= 1 && pageNum <= totalPages) {
+        const [page] = await newPdf.copyPages(pdf, [pageNum - 1]);
+        newPdf.addPage(page);
+      }
+    }
+  }
+
+  const result = Buffer.from(await newPdf.save());
+  console.log('Organize PDF - Result size:', result.length, 'bytes');
+  
+  return result;
 }
 
 // 📌 Rotate PDF pages
@@ -752,7 +839,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate operation
-    const supportedOperations = ['merge', 'split', 'extract-pages', 'remove-pages', 'watermark', 'rotate', 'crop', 'page-numbers'];
+    const supportedOperations = ['merge', 'split', 'extract-pages', 'remove-pages', 'watermark', 'rotate', 'crop', 'page-numbers', 'organize'];
     if (!supportedOperations.includes(operation)) {
       console.error(`[${requestId}] Validation failed: Unsupported operation '${operation}'.`);
       return NextResponse.json({ error: `Unsupported operation: ${operation}` }, { status: 400 });
@@ -787,6 +874,10 @@ export async function POST(request: NextRequest) {
       case 'remove-pages':
         tempFilePath = await saveTempFile(Buffer.from(await file!.arrayBuffer()));
         resultBuffer = await removePages(tempFilePath, options);
+        break;
+      case 'organize':
+        tempFilePath = await saveTempFile(Buffer.from(await file!.arrayBuffer()));
+        resultBuffer = await organizePDF(tempFilePath, options);
         break;
         case 'watermark':
             console.log(`[${requestId}] Starting watermark operation with options:`, options);
