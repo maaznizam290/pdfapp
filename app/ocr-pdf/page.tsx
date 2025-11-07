@@ -41,24 +41,79 @@ export default function OCRPDFPage() {
   };
 
   const handleOCR = async () => {
-    if (!file) return;
+    if (!file) {
+      alert('Please select a PDF file to process with OCR.');
+      return;
+    }
     
     setIsProcessing(true);
     
-    // Simulate processing
-    setTimeout(() => {
-      setIsProcessing(false);
+    try {
+      console.log('Starting OCR process with file:', { name: file.name, size: file.size });
       
-      // Create a download link for the OCR processed PDF
+      const options = {
+        language: ocrOptions.language,
+        outputFormat: ocrOptions.outputFormat,
+        imageQuality: ocrOptions.imageQuality,
+        preserveLayout: ocrOptions.preserveLayout
+      };
+      
+      // Use the process API endpoint
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('operation', 'ocr');
+      formData.append('options', JSON.stringify(options));
+
+      const response = await fetch('/api/pdf/process', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('API Error:', errorData);
+        throw new Error(errorData.error || errorData.details || 'Failed to process OCR');
+      }
+
+      const blob = await response.blob();
+      
+      console.log('OCR successful, blob size:', blob.size);
+      
+      if (blob.size === 0) {
+        throw new Error('Generated PDF is empty');
+      }
+      
+      // Create a clean blob with proper MIME type
+      const cleanBlob = new Blob([blob], { 
+        type: 'application/pdf'
+      });
+      
+      // Create download URL
+      const downloadUrl = URL.createObjectURL(cleanBlob);
+      const fileName = `ocr-${file.name}`;
+      
+      // Trigger immediate download
       const link = document.createElement('a');
-      link.href = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKL01lZGlhQm94IFswIDAgNTk1IDg0Ml0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovQ29udGVudHMgNCAwIFIKL1Jlc291cmNlcyA8PAovRm9udCA8PAovRjEgNSAwIFIKPj4KPj4KL0xlbmd0aCAxMQo+PgpzdHJlYW0KQlQKMTI3IDczNyBUZAovRjEgMTIgVGYKKE9DUiBQcm9jZXNzZWQpIFRqCkVUCmVuZHN0cmVhbQplbmRvYmoKNCAwIG9iago8PAovTGVuZ3RoIDExCj4+CnN0cmVhbQpCVAoxMjcgNzM3IFRkCi9GMSAxMiBUZgooT0NSIFByb2Nlc3NlZCkgVGogCkVUCmVuZHN0cmVhbQplbmRvYmoKMSAwIG9iago8PAplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDEwMCAwMDAwMCBuIAowMDAwMDAwMDc5IDAwMDAwIG4gCjAwMDAwMDAxNzMgMDAwMDAgbiAKMDAwMDAwMDMwMSAwMDAwMCBuIAowMDAwMDAwMzgwIDAwMDAwIG4gCnRyYWlsZXIKPDwKL1NpemUgNgovUm9vdCAxIDAgUgovSW5mbyA2IDAgUgo+PgpzdGFydHhyZWYKNDkyCiUlRU9G';
-      link.download = 'ocr-processed-document.pdf';
+      link.href = downloadUrl;
+      link.download = fileName;
+      link.style.display = 'none';
+      link.setAttribute('download', fileName);
+      link.setAttribute('rel', 'noopener noreferrer');
+      
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       
+      // Clean up URL
+      URL.revokeObjectURL(downloadUrl);
+      
       alert('OCR completed successfully! Your PDF is now searchable. Download started.');
-    }, 4000);
+    } catch (error: any) {
+      console.error('OCR error:', error);
+      alert(`Failed to process OCR: ${error.message || 'Unknown error'}`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const languages = [

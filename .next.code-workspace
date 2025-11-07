@@ -1,0 +1,31 @@
+{
+	"folders": [
+		{
+			"path": ".next"
+		},
+		{
+			"path": ".vscode"
+		},
+		{
+			"path": "api"
+		},
+		{
+			"path": "app"
+		},
+		{
+			"path": "components"
+		},
+		{
+			"path": "node_modules"
+		},
+		{
+			"path": "public"
+		},
+		{
+			"path": "scripts"
+		},
+		{
+			"path": "utils"
+		}
+	]
+}
