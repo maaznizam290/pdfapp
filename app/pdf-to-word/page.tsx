@@ -1,78 +1,94 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
-import { convertFile } from '@/utils/pdfApi';
-import SuccessModal from '@/components/success-modal';
-import { useSuccessModal } from '@/utils/useSuccessModal';
-import PdfConverter from '@/components/Pdfconverter';
+
+const BENEFITS = [
+  'Preserve fonts, tables, and layout as much as possible.',
+  'Edit text immediately in Microsoft Word or Google Docs.',
+  'Works in your browser—no software download required.',
+];
+
+const HOW_IT_WORKS = [
+  'Upload the PDF document you want to edit.',
+  'We convert it to an editable Word file while keeping formatting.',
+  'Download the DOCX file and continue editing anywhere.',
+];
 
 export default function PDFToWordPage() {
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { showSuccessModal, processedFileInfo, showSuccess, hideSuccess } = useSuccessModal();
 
   const handleFileSelect = (selectedFile: File | null) => {
     if (selectedFile && selectedFile.type === 'application/pdf') {
       setFile(selectedFile);
+      setErrorMessage('');
+    } else if (selectedFile) {
+      setErrorMessage('Please upload a PDF file.');
     }
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragOver(true);
   };
 
-  const handleDragLeave = (e: React.DragEvent) => {
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragOver(false);
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragOver(false);
-    const droppedFile = e.dataTransfer.files[0];
-    handleFileSelect(droppedFile);
+    const droppedFile = e.dataTransfer.files?.[0];
+    handleFileSelect(droppedFile ?? null);
   };
 
   const handleConvert = async () => {
     if (!file) {
-      alert('Please select a PDF file to convert.');
+      setErrorMessage('Please select a PDF file first.');
       return;
     }
-    
+
     setIsProcessing(true);
-    
+    setErrorMessage('');
+
     try {
-      const blob = await convertFile(file, 'pdf-to-word');
-      
-      if (blob.size === 0) {
-        throw new Error('Generated document is empty');
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('operation', 'pdf-to-word');
+
+      const response = await fetch('/api/pdf/convert', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to convert PDF to Word');
       }
-      
-      const baseName = file.name.replace(/\.pdf$/i, '');
-      const fileName = `${baseName}-converted-${new Date().toISOString().slice(0, 10)}.docx`;
-      
-      const url = URL.createObjectURL(blob);
+
+      const blob = await response.blob();
+      if (blob.size === 0) {
+        throw new Error('Generated Word document is empty');
+      }
+
+      const downloadUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = url;
-      link.download = fileName;
+      link.href = downloadUrl;
+      link.download = file.name.replace(/\.pdf$/i, '.docx');
       link.style.display = 'none';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      
-      showSuccess({
-        fileName,
-        fileSize: blob.size,
-        downloadUrl: '',
-      });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      alert(`Failed to convert PDF to Word: ${errorMessage}. Please try again.`);
+      URL.revokeObjectURL(downloadUrl);
+    } catch (error: any) {
+      console.error('PDF to Word conversion failed:', error);
+      setErrorMessage(error.message || 'Failed to convert PDF to Word');
     } finally {
       setIsProcessing(false);
     }
@@ -80,122 +96,130 @@ export default function PDFToWordPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 py-12">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-8">
-          <Link href="/" className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-700 mb-4">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="mb-8 text-center">
+          <Link
+            href="/tools"
+            className="mb-4 inline-flex items-center gap-2 text-blue-600 hover:text-blue-700"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
             Back to tools
           </Link>
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">PDF to Word</h1>
+          <h1 className="mb-4 text-4xl font-bold text-gray-900">PDF to Word</h1>
           <p className="text-lg text-gray-600">
-            Easily convert your PDF files into easy to edit DOC and DOCX documents. The converted WORD document is almost 100% accurate.
+            Convert your PDF into an editable Word document while keeping the original formatting as much as possible.
           </p>
         </div>
 
-        <div 
-          className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+        {/* Upload area */}
+        <div
+          className={`rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
             isDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 bg-white'
           }`}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-2xl">📄</span>
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-3xl">
+            📄
           </div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">
-            {isDragOver ? 'Drop your PDF file here' : 'Choose PDF file or drag it here'}
+          <h3 className="mb-2 text-lg font-semibold text-gray-900">
+            {isDragOver ? 'Drop your PDF here' : 'Choose a PDF file or drag it here'}
           </h3>
-          <p className="text-gray-600 mb-4">
-            Select a PDF file to convert it to Word document
-          </p>
+          <p className="mb-4 text-gray-600">Upload the PDF you’d like to convert to Word.</p>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+            className="rounded-lg bg-blue-600 px-6 py-3 font-medium text-white transition-colors hover:bg-blue-700"
           >
             Choose File
           </button>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf"
-            onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
+            accept="application/pdf"
+            onChange={(e) => handleFileSelect(e.target.files?.[0] ?? null)}
             className="hidden"
           />
         </div>
 
+        {/* File info and action */}
         {file && (
-          <div className="mt-8 bg-white rounded-lg shadow-sm border">
-            <div className="p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                File to convert
-              </h3>
-              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                <span className="text-lg">📄</span>
-                <div>
-                  <p className="font-medium text-gray-900">{file.name}</p>
-                  <p className="text-sm text-gray-500">
-                    {(file.size / 1024 / 1024).toFixed(2)} MB
-                  </p>
+          <div className="mt-6 space-y-6">
+            <div className="rounded-lg border bg-white p-6 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">📄</span>
+                  <div>
+                    <p className="font-medium text-gray-900">{file.name}</p>
+                    <p className="text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => setFile(null)}
+                  className="text-gray-400 transition hover:text-gray-600"
+                >
+                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
               </div>
+            </div>
+
+            <div className="text-center">
+              <button
+                onClick={handleConvert}
+                disabled={isProcessing}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-8 py-4 text-lg font-semibold text-white transition-colors hover:bg-blue-700 disabled:bg-gray-400"
+              >
+                {isProcessing ? (
+                  <>
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Converting…
+                  </>
+                ) : (
+                  'Convert to Word'
+                )}
+              </button>
             </div>
           </div>
         )}
 
-        {file && (
-          <div className="mt-8 text-center">
-            <button
-              onClick={handleConvert}
-              disabled={isProcessing}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
-            >
-              {isProcessing ? (
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  Converting to Word...
-                </div>
-              ) : (
-                'Convert to Word'
-              )}
-            </button>
-          </div>
+        {errorMessage && (
+          <p className="mt-4 text-center text-sm text-red-500">
+            {errorMessage}
+          </p>
         )}
 
-        <div className="mt-12 bg-blue-50 rounded-lg p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">How to convert PDF to Word</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="text-center">
-              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <span className="text-xl">1</span>
+        {/* How it works */}
+        <div className="mt-12 rounded-lg bg-blue-50 p-6">
+          <h3 className="mb-4 text-lg font-semibold text-gray-900">How to convert PDF to Word</h3>
+          <div className="grid gap-4 md:grid-cols-3">
+            {HOW_IT_WORKS.map((step, index) => (
+              <div key={index} className="text-center">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-lg">
+                  {index + 1}
+                </div>
+                <p className="text-sm text-gray-600">{step}</p>
               </div>
-              <h4 className="font-medium text-gray-900 mb-2">Upload PDF file</h4>
-              <p className="text-sm text-gray-600">Select a PDF file from your device</p>
-            </div>
-            <div className="text-center">
-              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <span className="text-xl">2</span>
-              </div>
-              <h4 className="font-medium text-gray-900 mb-2">Convert to Word</h4>
-              <p className="text-sm text-gray-600">Click convert and wait for processing</p>
-            </div>
-            <div className="text-center">
-              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <span className="text-xl">3</span>
-              </div>
-              <h4 className="font-medium text-gray-900 mb-2">Download result</h4>
-              <p className="text-sm text-gray-600">Download your converted Word document</p>
-            </div>
+            ))}
           </div>
         </div>
 
-        <SuccessModal
-          isOpen={showSuccessModal}
-          onClose={hideSuccess}
-          fileInfo={processedFileInfo}
-        />
+        {/* Benefits */}
+        <div className="mt-8 rounded-lg bg-white p-6 shadow-sm">
+          <h3 className="mb-4 text-lg font-semibold text-gray-900">Why choose this converter?</h3>
+          <ul className="grid gap-4 md:grid-cols-2">
+            {BENEFITS.map((item) => (
+              <li key={item} className="flex items-start gap-3 text-sm text-gray-600">
+                <span className="text-blue-500">✓</span>
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
     </div>
   );

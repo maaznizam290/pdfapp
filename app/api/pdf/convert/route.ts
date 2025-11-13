@@ -1,509 +1,297 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+type ConversionConfig = {
+  endpoint: string;
+  contentType: string;
+  filename: string;
+};
+
 // Map operations to ConvertAPI endpoints
-const CONVERSION_ENDPOINTS: Record<string, { endpoint: string; contentType: string; filename: string }> = {
+const CONVERSION_ENDPOINTS: Record<string, ConversionConfig> = {
+  'pdf-to-word': {
+    endpoint: 'pdf/to/docx',
+    contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    filename: 'converted-document.docx',
+  },
   'pdf-to-ppt': {
     endpoint: 'pdf/to/pptx',
     contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    filename: 'converted-presentation.pptx'
+    filename: 'converted-presentation.pptx',
   },
   'pdf-to-excel': {
     endpoint: 'pdf/to/xlsx',
     contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    filename: 'converted-spreadsheet.xlsx'
-  },
-  'pdf-to-word': {
-    endpoint: 'pdf/to/docx',
-    contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    filename: 'converted-document.docx'
+    filename: 'converted-spreadsheet.xlsx',
   },
   'pdf-to-jpg': {
     endpoint: 'pdf/to/jpg',
     contentType: 'application/zip',
-    filename: 'converted-images.zip'
+    filename: 'converted-images.zip',
   },
   'pdf-to-png': {
     endpoint: 'pdf/to/png',
     contentType: 'application/zip',
-    filename: 'converted-images.zip'
+    filename: 'converted-images.zip',
   },
   'pdf-to-webp': {
     endpoint: 'pdf/to/webp',
     contentType: 'application/zip',
-    filename: 'converted-images.zip'
+    filename: 'converted-images.zip',
   },
   'word-to-pdf': {
     endpoint: 'docx/to/pdf',
     contentType: 'application/pdf',
-    filename: 'converted-document.pdf'
+    filename: 'converted-document.pdf',
   },
   'excel-to-pdf': {
     endpoint: 'xlsx/to/pdf',
     contentType: 'application/pdf',
-    filename: 'converted-spreadsheet.pdf'
+    filename: 'converted-spreadsheet.pdf',
   },
   'powerpoint-to-pdf': {
     endpoint: 'pptx/to/pdf',
     contentType: 'application/pdf',
-    filename: 'converted-presentation.pdf'
+    filename: 'converted-presentation.pdf',
   },
   'jpg-to-pdf': {
     endpoint: 'jpg/to/pdf',
     contentType: 'application/pdf',
-    filename: 'converted-images.pdf'
+    filename: 'converted-images.pdf',
   },
   'html-to-pdf': {
     endpoint: 'html/to/pdf',
     contentType: 'application/pdf',
-    filename: 'converted-document.pdf'
-  }
+    filename: 'converted-document.pdf',
+  },
 };
 
-export async function OPTIONS(request: NextRequest) {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
-  });
-}
+const PDFREST_ENDPOINTS: Record<
+  string,
+  { url: string; contentType: string; extension: string }
+> = {
+  'pdf-to-word': {
+    url: 'https://api.pdfrest.com/word',
+    contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    extension: '.docx',
+  },
+  'pdf-to-ppt': {
+    url: 'https://api.pdfrest.com/powerpoint',
+    contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    extension: '.pptx',
+  },
+  'pdf-to-excel': {
+    url: 'https://api.pdfrest.com/excel',
+    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    extension: '.xlsx',
+  },
+  'pdf-to-jpg': {
+    url: 'https://api.pdfrest.com/jpg',
+    contentType: 'application/zip',
+    extension: '.zip',
+  },
+};
 
 export async function POST(request: NextRequest) {
-  try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File | null;
-    const operation = formData.get('operation') as string;
-    const optionsStr = formData.get('options') as string | null;
-    const options = optionsStr ? JSON.parse(optionsStr) : {};
+  const formData    = await request.formData();
+  const file        = formData.get('file') as File | null;
+  const operation   = formData.get('operation') as string;
+  const options     = JSON.parse(formData.get('options') as string ?? '{}');
 
-    if (!file) {
-      return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
-    }
+  if (!file)      return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
+  if (!operation) return NextResponse.json({ error: 'No operation specified' }, { status: 400 });
 
-    if (!operation) {
-      return NextResponse.json({ error: 'No operation specified' }, { status: 400 });
-    }
+  // Validate size & type quickly
+  if (file.size > 50 * 1024 * 1024) {
+    return NextResponse.json({ error: 'File too large (50MB max)' }, { status: 400 });
+  }
+  if (operation === 'pdf-to-word' && file.type !== 'application/pdf') {
+    return NextResponse.json({ error: 'Only PDF files are supported' }, { status: 400 });
+  }
 
-    // File size validation (50MB limit)
-    const maxFileSize = 50 * 1024 * 1024; // 50MB
-    if (file.size > maxFileSize) {
-      return NextResponse.json({ 
-        error: 'File too large. Maximum file size is 50MB.',
-        code: 'FILE_TOO_LARGE'
-      }, { status: 400 });
-    }
+  const conversionConfig = CONVERSION_ENDPOINTS[operation];
+  if (!conversionConfig) {
+    return NextResponse.json({ error: `Unsupported operation: ${operation}` }, { status: 400 });
+  }
 
-    // File type validation based on operation
-    if (operation === 'word-to-pdf') {
-      // For Word to PDF conversion, accept Word documents
-      const validWordTypes = [
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/msword'
-      ];
-      const isValidWordFile = validWordTypes.includes(file.type) || 
-                             file.name.toLowerCase().endsWith('.doc') || 
-                             file.name.toLowerCase().endsWith('.docx');
-      
-      if (!isValidWordFile) {
-        return NextResponse.json({ 
-          error: 'Invalid file type. Please upload a Word document (.doc or .docx).',
-          code: 'INVALID_FILE_TYPE'
-        }, { status: 400 });
-      }
-    } else if (operation === 'excel-to-pdf') {
-      // For Excel to PDF conversion, accept Excel documents
-      const validExcelTypes = [
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'application/vnd.ms-excel'
-      ];
-      const isValidExcelFile = validExcelTypes.includes(file.type) || 
-                              file.name.toLowerCase().endsWith('.xls') || 
-                              file.name.toLowerCase().endsWith('.xlsx');
-      
-      if (!isValidExcelFile) {
-        return NextResponse.json({ 
-          error: 'Invalid file type. Please upload an Excel document (.xls or .xlsx).',
-          code: 'INVALID_FILE_TYPE'
-        }, { status: 400 });
-      }
-    } else if (operation === 'powerpoint-to-pdf') {
-      // For PowerPoint to PDF conversion, accept PowerPoint documents
-      const validPowerPointTypes = [
-        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        'application/vnd.ms-powerpoint'
-      ];
-      const isValidPowerPointFile = validPowerPointTypes.includes(file.type) || 
-                                   file.name.toLowerCase().endsWith('.ppt') || 
-                                   file.name.toLowerCase().endsWith('.pptx');
-      
-      if (!isValidPowerPointFile) {
-        return NextResponse.json({ 
-          error: 'Invalid file type. Please upload a PowerPoint document (.ppt or .pptx).',
-          code: 'INVALID_FILE_TYPE'
-        }, { status: 400 });
-      }
-    } else if (operation === 'jpg-to-pdf') {
-      // For JPG to PDF conversion, accept image files
-      const validImageTypes = [
-        'image/jpeg',
-        'image/jpg',
-        'image/png',
-        'image/webp'
-      ];
-      const isValidImageFile = validImageTypes.includes(file.type) || 
-                              file.name.toLowerCase().match(/\.(jpg|jpeg|png|webp)$/);
-      
-      if (!isValidImageFile) {
-        return NextResponse.json({ 
-          error: 'Invalid file type. Please upload an image file (.jpg, .jpeg, .png, or .webp).',
-          code: 'INVALID_FILE_TYPE'
-        }, { status: 400 });
-      }
-    } else if (operation === 'html-to-pdf') {
-      // For HTML to PDF conversion, accept HTML files
-      const validHtmlTypes = [
-        'text/html',
-        'application/xhtml+xml'
-      ];
-      const isValidHtmlFile = validHtmlTypes.includes(file.type) || 
-                             file.name.toLowerCase().endsWith('.html') || 
-                             file.name.toLowerCase().endsWith('.htm');
-      
-      if (!isValidHtmlFile) {
-        return NextResponse.json({ 
-          error: 'Invalid file type. Please upload an HTML file (.html or .htm).',
-          code: 'INVALID_FILE_TYPE'
-        }, { status: 400 });
-      }
+  const fileBuffer = Buffer.from(await file.arrayBuffer());
+
+  if (PDFREST_ENDPOINTS[operation]) {
+    const pdfRestConfig = PDFREST_ENDPOINTS[operation];
+    const pdfRestApiKey = process.env.PDFREST_API_KEY || '52e0933c-4aff-48c0-ab1d-9b0a463474a8';
+    if (!pdfRestApiKey) {
+      console.warn('PDFRest API key not configured. Skipping PDFRest conversion.');
     } else {
-      // For all other operations, require PDF files
-      if (file.type !== 'application/pdf') {
-        return NextResponse.json({ 
-          error: 'Invalid file type. Please upload a PDF file.',
-          code: 'INVALID_FILE_TYPE'
-        }, { status: 400 });
-      }
-    }
-
-    const conversionConfig = CONVERSION_ENDPOINTS[operation];
-    if (!conversionConfig) {
-      return NextResponse.json({ error: `Unsupported operation: ${operation}` }, { status: 400 });
-    }
-
-    const secret = 'J5pccF6XgSKfVhG6XYxvtS4KTk9iBVWS';
-    
-    // Check if ConvertAPI secret is valid
-    if (!secret || secret.length < 10) {
-      return NextResponse.json(
-        { error: 'ConvertAPI secret is not configured properly' },
-        { status: 500 }
-      );
-    }
-
-    // Convert File to Buffer
-    const fileBuffer = Buffer.from(await file.arrayBuffer());
-
-    // Create FormData for ConvertAPI using native FormData
-    const convertFormData = new FormData();
-    convertFormData.append('File', new Blob([fileBuffer]), file.name);
-
-      // Add conversion options for image formats
-      if (operation.includes('pdf-to-')) {
-        const imageFormat = operation.replace('pdf-to-', '');
-        
-        // Add quality settings (only for lossy formats)
-        if (options.quality && (imageFormat === 'jpg' || imageFormat === 'webp')) {
-          const qualityMap: Record<string, number> = { low: 50, medium: 75, high: 90 };
-          convertFormData.append('ImageQuality', (qualityMap[options.quality] || 75).toString());
-        }
-        
-        // Add resolution settings
-        if (options.resolution) {
-          convertFormData.append('ImageResolution', options.resolution);
-        }
-        
-        // Add extract mode
-        if (options.extractMode === 'images') {
-          convertFormData.append('ExtractImages', 'true');
-        }
-        
-        // Add compression settings for PNG (try different parameter names)
-        if (imageFormat === 'png') {
-          // Try different PNG compression parameters that ConvertAPI might support
-          const compressionMap: Record<string, number> = { low: 1, medium: 5, high: 9 };
-          const compressionLevel = compressionMap[options.quality] || 5;
-          
-          // Try multiple parameter names that ConvertAPI might support
-          convertFormData.append('CompressionLevel', compressionLevel.toString());
-          convertFormData.append('PNGCompression', compressionLevel.toString());
-          convertFormData.append('ImageCompression', compressionLevel.toString());
-        }
-        
-        // Add additional ConvertAPI parameters for image conversion
-        convertFormData.append('StoreFile', 'true');
-        convertFormData.append('ImageFormat', imageFormat.toUpperCase());
-      }
-      
-      // Add conversion options for Office to PDF conversions
-      if (operation === 'word-to-pdf' || operation === 'excel-to-pdf' || operation === 'powerpoint-to-pdf') {
-        convertFormData.append('StoreFile', 'true');
-        
-        // Add PDF quality settings if provided
-        if (options.quality) {
-          const qualityMap: Record<string, string> = { 
-            low: 'screen', 
-            medium: 'ebook', 
-            high: 'printer' 
-          };
-          convertFormData.append('PdfQuality', qualityMap[options.quality] || 'ebook');
-        }
-      }
-      
-      // Add conversion options for image to PDF conversions
-      if (operation === 'jpg-to-pdf') {
-        convertFormData.append('StoreFile', 'true');
-        
-        // Add PDF quality settings if provided
-        if (options.quality) {
-          const qualityMap: Record<string, string> = { 
-            low: 'screen', 
-            medium: 'ebook', 
-            high: 'printer' 
-          };
-          convertFormData.append('PdfQuality', qualityMap[options.quality] || 'ebook');
-        }
-      }
-      
-      // Add conversion options for HTML to PDF conversions
-      if (operation === 'html-to-pdf') {
-        convertFormData.append('StoreFile', 'true');
-        
-        // Add PDF quality settings if provided
-        if (options.quality) {
-          const qualityMap: Record<string, string> = { 
-            low: 'screen', 
-            medium: 'ebook', 
-            high: 'printer' 
-          };
-          convertFormData.append('PdfQuality', qualityMap[options.quality] || 'ebook');
-        }
-      }
-
-    // Convert PDF using ConvertAPI
-    const convertApiUrl = `https://v2.convertapi.com/convert/${conversionConfig.endpoint}?Secret=${secret}`;
-    console.log('ConvertAPI URL:', convertApiUrl);
-    console.log('Operation:', operation);
-    console.log('Options:', options);
-    
-    // Debug: Log all FormData entries
-    console.log('FormData entries:');
-    const formDataEntries = Array.from(convertFormData.entries());
-    formDataEntries.forEach(([key, value]) => {
-      console.log(`  ${key}: ${value}`);
-    });
-    
-    const response = await fetch(convertApiUrl, {
-      method: 'POST',
-      body: convertFormData,
-    });
-    
-    console.log('ConvertAPI response status:', response.status);
-    console.log('ConvertAPI response headers:', Object.fromEntries(response.headers.entries()));
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('ConvertAPI error response:', errorText);
-      return NextResponse.json(
-        { error: `ConvertAPI error: ${response.status} - ${errorText}` },
-        { status: response.status }
-      );
-    }
-
-    const result = await response.json();
-    console.log('ConvertAPI response:', result);
-    console.log('Number of files returned:', result.Files?.length || 0);
-    if (result.Files && result.Files.length > 0) {
-      console.log('First file info:', {
-        fileName: result.Files[0].FileName,
-        fileExt: result.Files[0].FileExt,
-        fileSize: result.Files[0].FileSize
-      });
-    }
-
-    // Check for specific ConvertAPI error messages
-    if (result.Message && result.Message.includes('no tables to extract')) {
-      return NextResponse.json(
-        { 
-          error: 'This PDF does not contain extractable tables. PDF to Excel conversion works best with PDFs that contain structured data in table format.',
-          code: 'NO_TABLES_FOUND'
-        },
-        { status: 400 }
-      );
-    }
-
-    // Check for image conversion specific errors
-    if (result.Message && result.Message.includes('no images')) {
-      return NextResponse.json(
-        { 
-          error: 'This PDF does not contain extractable images. Try converting pages to images instead.',
-          code: 'NO_IMAGES_FOUND'
-        },
-        { status: 400 }
-      );
-    }
-
-    // Check for conversion cost limits
-    if (result.Message && result.Message.includes('conversion cost')) {
-      return NextResponse.json(
-        { 
-          error: 'Conversion limit reached. Please try again later or contact support.',
-          code: 'CONVERSION_LIMIT'
-        },
-        { status: 429 }
-      );
-    }
-
-    if (!result.Files || result.Files.length === 0) {
-      return NextResponse.json(
-        { error: result.Message || JSON.stringify(result) || 'Conversion failed' },
-        { status: 500 }
-      );
-    }
-
-    // Handle different conversion types
-    let convertedBuffer: Buffer;
-    let contentType: string;
-    let filename: string;
-
-    // Check if we have multiple files (multi-page PDF)
-    const isMultiPage = result.Files.length > 1;
-    console.log(`Processing ${result.Files.length} file(s) - Multi-page: ${isMultiPage}`);
-
-    if (isMultiPage) {
-      // For multi-page PDFs, create a ZIP file containing all pages
-      console.log('Creating ZIP file for multiple pages...');
-      
       try {
-        // Import JSZip dynamically
-        const JSZip = (await import('jszip')).default;
-        const zip = new JSZip();
-        
-        // Fetch all files and add them to ZIP
-        for (let i = 0; i < result.Files.length; i++) {
-          const file = result.Files[i];
-          console.log(`Fetching file ${i + 1}/${result.Files.length}: ${file.FileName}`);
-          
-          if (file.Url) {
-            const fileResponse = await fetch(file.Url);
-            if (!fileResponse.ok) {
-              throw new Error(`Failed to fetch file ${file.FileName}: ${fileResponse.status}`);
-            }
-            
-            const fileArrayBuffer = await fileResponse.arrayBuffer();
-            zip.file(file.FileName, fileArrayBuffer);
-          } else if (file.FileData) {
-            zip.file(file.FileName, file.FileData, { base64: true });
-          }
-        }
-        
-        // Generate ZIP file
-        const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
-        convertedBuffer = zipBuffer;
-        contentType = 'application/zip';
-        
-        // Create filename based on original PDF name
-        const baseName = file.name.replace(/\.pdf$/i, '');
-        filename = `${baseName}-pages.zip`;
-        
-        console.log('Successfully created ZIP file:', {
-          size: convertedBuffer.length,
-          filesCount: result.Files.length,
-          filename
+        const pdfRestForm = new FormData();
+        pdfRestForm.append('file', new Blob([fileBuffer]), file.name);
+
+        const pdfRestResponse = await fetch(pdfRestConfig.url, {
+          method: 'POST',
+          headers: {
+            'Api-Key': pdfRestApiKey,
+            Accept: 'application/json',
+          },
+          body: pdfRestForm,
         });
-        
-      } catch (zipError) {
-        console.error('Error creating ZIP file:', zipError);
-        return NextResponse.json(
-          { error: `Failed to create ZIP file: ${zipError instanceof Error ? zipError.message : 'Unknown error'}` },
-          { status: 500 }
-        );
-      }
-    } else {
-      // Single file conversion
-      const firstFile = result.Files[0];
-      
-      if (firstFile.FileData) {
-        // ConvertAPI returned base64 data
-        convertedBuffer = Buffer.from(firstFile.FileData, 'base64');
-        contentType = conversionConfig.contentType;
-        filename = firstFile.FileName || conversionConfig.filename;
-      } else if (firstFile.Url) {
-        // ConvertAPI returned a URL, need to fetch the file
-        console.log('Fetching single file from ConvertAPI URL:', firstFile.Url);
-        
-        try {
-          const fileResponse = await fetch(firstFile.Url);
-          if (!fileResponse.ok) {
-            throw new Error(`Failed to fetch file from ConvertAPI: ${fileResponse.status}`);
-          }
-          
-          const fileArrayBuffer = await fileResponse.arrayBuffer();
-          convertedBuffer = Buffer.from(fileArrayBuffer);
-          
-          // Determine content type based on file extension
-          const fileExt = firstFile.FileExt || 'jpg';
-          contentType = fileExt === 'jpg' ? 'image/jpeg' : 
-                       fileExt === 'png' ? 'image/png' : 
-                       fileExt === 'webp' ? 'image/webp' : 
-                       'application/zip';
-          
-          filename = firstFile.FileName || conversionConfig.filename;
-          
-          console.log('Successfully fetched single file:', {
-            size: convertedBuffer.length,
-            contentType,
-            filename
-          });
-        } catch (fetchError) {
-          console.error('Error fetching file from ConvertAPI URL:', fetchError);
-          return NextResponse.json(
-            { error: `Failed to fetch converted file: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}` },
-            { status: 500 }
-          );
+
+        if (!pdfRestResponse.ok) {
+          const errorText = await pdfRestResponse.text();
+          throw new Error(`PDFRest error: ${pdfRestResponse.status} - ${errorText}`);
         }
-      } else {
-        return NextResponse.json(
-          { error: 'ConvertAPI response missing both FileData and Url' },
-          { status: 500 }
-        );
+
+        const json = await pdfRestResponse.json();
+
+        const downloadUrl =
+          json?.output_url ||
+          json?.download_url ||
+          json?.outputUrl ||
+          json?.links?.[0]?.href ||
+          json?.result?.url;
+
+        let convertedBuffer: Buffer | null = null;
+
+        if (downloadUrl) {
+          const fileResp = await fetch(downloadUrl);
+          if (!fileResp.ok) {
+            throw new Error(`Failed to download converted file from PDFRest: ${fileResp.status}`);
+          }
+          const arrBuf = await fileResp.arrayBuffer();
+          convertedBuffer = Buffer.from(arrBuf);
+        } else if (json?.file_data) {
+          convertedBuffer = Buffer.from(json.file_data, 'base64');
+        } else if (json?.files?.[0]?.fileData) {
+          convertedBuffer = Buffer.from(json.files[0].fileData, 'base64');
+        }
+
+        if (convertedBuffer && convertedBuffer.length > 0) {
+          const headers = new Headers();
+          headers.set('Content-Type', pdfRestConfig.contentType);
+          headers.set(
+            'Content-Disposition',
+            `attachment; filename="${file.name.replace(/\.pdf$/i, pdfRestConfig.extension)}"`
+          );
+          console.log(`PDFRest conversion succeeded for ${operation}.`);
+          return new NextResponse(new Uint8Array(convertedBuffer), { headers });
+        }
+
+        throw new Error('PDFRest response missing converted file data.');
+      } catch (error: any) {
+        console.warn('PDFRest conversion failed, falling back to ConvertAPI:', error.message || error);
       }
     }
+  }
 
-    const headers = new Headers();
-    headers.set('Content-Type', contentType);
-    headers.set('Content-Disposition', `attachment; filename="${filename}"`);
-    
-    // Add security headers for secure downloads
-    headers.set('X-Content-Type-Options', 'nosniff');
-    headers.set('X-Frame-Options', 'DENY');
-    headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-    headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    headers.set('Pragma', 'no-cache');
-    headers.set('Expires', '0');
-    
-    // Add CORS headers for secure cross-origin requests
-    headers.set('Access-Control-Allow-Origin', '*');
-    headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    headers.set('Access-Control-Allow-Headers', 'Content-Type');
+  if (operation === 'word-to-pdf') {
+    const apyToken = process.env.APYHUB_API_TOKEN;
+    if (!apyToken) {
+      return NextResponse.json(
+        { error: 'APYHub API token not configured on server.' },
+        { status: 500 },
+      );
+    }
 
-    return new NextResponse(new Uint8Array(convertedBuffer), { headers });
-  } catch (error: any) {
-    console.error('Conversion error:', error);
+    try {
+      const fileNameBase = file.name.replace(/\.[^/.]+$/, '') || 'converted';
+      const apyUrl = `https://api.apyhub.com/convert/word-file/pdf-file?output=${encodeURIComponent(
+        `${fileNameBase}.pdf`,
+      )}&landscape=false`;
+
+      const apyForm = new FormData();
+      apyForm.append('file', new Blob([fileBuffer]), file.name);
+
+      const apyResponse = await fetch(apyUrl, {
+        method: 'POST',
+        headers: {
+          'apy-token': apyToken,
+        },
+        body: apyForm,
+      });
+
+      if (!apyResponse.ok) {
+        const errorText = await apyResponse.text();
+        return NextResponse.json(
+          { error: `APYHub error: ${apyResponse.status} - ${errorText}` },
+          { status: apyResponse.status },
+        );
+      }
+
+      const apyBuffer = Buffer.from(await apyResponse.arrayBuffer());
+      if (apyBuffer.length === 0) {
+        return NextResponse.json(
+          { error: 'APYHub returned an empty PDF.' },
+          { status: 500 },
+        );
+      }
+
+      const headers = new Headers();
+      headers.set('Content-Type', conversionConfig.contentType);
+      headers.set(
+        'Content-Disposition',
+        `attachment; filename="${fileNameBase || 'converted-document'}.pdf"`,
+      );
+      console.log('APYHub Word to PDF conversion succeeded.');
+      return new NextResponse(new Uint8Array(apyBuffer), { headers });
+    } catch (error: any) {
+      return NextResponse.json(
+        { error: `APYHub conversion failed: ${error.message || error}` },
+        { status: 500 },
+      );
+    }
+  }
+
+  const secret = process.env.CONVERT_API_SECRET || 'J5pccF6XgSKfVhG6XYxvtS4KTk9iBVWS';
+
+  if (!secret || secret.length < 10) {
+    return NextResponse.json({ error: 'ConvertAPI secret not configured' }, { status: 500 });
+  }
+
+  const convertFormData = new FormData();
+  convertFormData.append('File', new Blob([fileBuffer]), file.name);
+
+  const convertApiUrl = `https://v2.convertapi.com/convert/${conversionConfig.endpoint}?Secret=${secret}`;
+  const response = await fetch(convertApiUrl, {
+    method: 'POST',
+    body: convertFormData,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
     return NextResponse.json(
-      { error: error.message || 'Conversion failed' },
-      { status: 500 }
+      { error: `ConvertAPI error: ${response.status} - ${errorText}` },
+      { status: response.status },
     );
   }
+
+  const result = await response.json();
+  if (!result.Files || result.Files.length === 0) {
+    return NextResponse.json(
+      { error: result.Message || 'Conversion failed' },
+      { status: 500 },
+    );
+  }
+
+  const docxFile = result.Files[0];
+
+  let convertedBuffer: Buffer;
+  if (docxFile.Url) {
+    const fileResponse = await fetch(docxFile.Url);
+    if (!fileResponse.ok) {
+      return NextResponse.json({ error: 'Failed to download converted file' }, { status: 500 });
+    }
+    const arrayBuffer = await fileResponse.arrayBuffer();
+    convertedBuffer = Buffer.from(arrayBuffer);
+  } else if (docxFile.FileData) {
+    convertedBuffer = Buffer.from(docxFile.FileData, 'base64');
+  } else {
+    return NextResponse.json({ error: 'Converted file is missing data' }, { status: 500 });
+  }
+
+  const headers = new Headers();
+  headers.set('Content-Type', conversionConfig.contentType);
+  headers.set(
+    'Content-Disposition',
+    `attachment; filename="${docxFile.FileName || conversionConfig.filename}"`
+  );
+
+  return new NextResponse(new Uint8Array(convertedBuffer), { headers });
 }

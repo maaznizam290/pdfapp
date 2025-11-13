@@ -3,6 +3,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { writeFile, unlink, readFile, access } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { spawn } from 'child_process';
 
 // Helper: safely delete temp files
 async function safeUnlink(filePath: string): Promise<void> {
@@ -19,6 +20,72 @@ async function saveTempFile(buffer: Buffer): Promise<string> {
   const tempPath = join(tmpdir(), `temp_${Date.now()}.pdf`);
   await writeFile(tempPath, buffer);
   return tempPath;
+}
+
+async function attemptGhostscriptRepair(buffer: Buffer): Promise<Buffer | null> {
+  const tempDir = tmpdir();
+  const inputPath = join(tempDir, `gs_repair_input_${Date.now()}.pdf`);
+  const outputPath = join(tempDir, `gs_repair_output_${Date.now()}.pdf`);
+
+  const candidateCommands =
+    process.platform === 'win32'
+      ? ['gswin64c', 'gswin32c', 'gs']
+      : ['gs'];
+
+  try {
+    await writeFile(inputPath, buffer);
+
+    const args = [
+      '-o',
+      outputPath,
+      '-sDEVICE=pdfwrite',
+      '-dNOPAUSE',
+      '-dBATCH',
+      '-dSAFER',
+      '-dPDFSETTINGS=/prepress',
+      inputPath,
+    ];
+
+    let success = false;
+    let lastError: any = null;
+
+    for (const cmd of candidateCommands) {
+      try {
+        console.log(`Running Ghostscript (${cmd}) for PDF repair`);
+        await new Promise<void>((resolve, reject) => {
+          const gs = spawn(cmd, args, { stdio: 'inherit' });
+          gs.on('error', reject);
+          gs.on('close', (code) => {
+            if (code === 0) {
+              resolve();
+            } else {
+              reject(new Error(`Ghostscript exited with code ${code}`));
+            }
+          });
+        });
+        success = true;
+        break;
+      } catch (err) {
+        lastError = err;
+        console.warn(`Ghostscript command "${cmd}" failed:`, err instanceof Error ? err.message : err);
+      }
+    }
+
+    if (!success) {
+      if (lastError) throw lastError;
+      return null;
+    }
+
+    const repairedBuffer = await readFile(outputPath);
+    console.log('Ghostscript repair succeeded, output size:', repairedBuffer.length);
+    return repairedBuffer;
+  } catch (error) {
+    console.error('Ghostscript repair attempt failed:', error instanceof Error ? error.message : error);
+    return null;
+  } finally {
+    await safeUnlink(inputPath);
+    await safeUnlink(outputPath);
+  }
 }
 
 // 📌 Merge PDFs
@@ -213,7 +280,7 @@ async function rotatePDF(inputPath: string, options: any): Promise<Buffer> {
     } else {
       // Parse page range - simplified approach
       console.log('Parsing page range:', pageRange);
-      const pageNumbers = pageRange.split(',').map(p => p.trim());
+      const pageNumbers = pageRange.split(',').map((p: string) => p.trim());
       pagesToRotate = [];
       
       for (const pageStr of pageNumbers) {
@@ -272,7 +339,7 @@ async function rotatePDF(inputPath: string, options: any): Promise<Buffer> {
       }
     }
     
-    console.log('Pages to rotate (1-based):', pagesToRotate.map(p => p + 1));
+    console.log('Pages to rotate (1-based):', pagesToRotate.map((p: number) => p + 1));
     console.log('Pages to rotate (0-based indices):', pagesToRotate);
     console.log('Total pages in document:', pageCount);
     
@@ -283,7 +350,7 @@ async function rotatePDF(inputPath: string, options: any): Promise<Buffer> {
     // Sort and remove duplicates
     pagesToRotate.sort((a, b) => a - b);
     const uniquePages = Array.from(new Set(pagesToRotate));
-    console.log('Unique pages to rotate:', uniquePages.map(p => p + 1));
+    console.log('Unique pages to rotate:', uniquePages.map((p: number) => p + 1));
     
     // Rotate each page
     for (const pageIndex of uniquePages) {
@@ -619,23 +686,108 @@ function toAlphabet(num: number): string {
 }
 
 // 📌 Repair PDF - Fix corrupted or damaged PDF files
+function wrapText(text: string, maxWidth: number): string[] {
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    if ((currentLine + word).length > maxWidth) {
+      lines.push(currentLine.trim());
+      currentLine = '';
+    }
+    currentLine += `${word} `;
+  }
+
+  if (currentLine.trim().length > 0) {
+    lines.push(currentLine.trim());
+  }
+
+  return lines;
+}
+
+async function createRepairFailurePdf(error: any, originalBytes?: Buffer | null): Promise<Buffer> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([595.28, 841.89]); // A4
+
+  const { width, height } = page.getSize();
+  let cursorY = height - 72;
+
+  const drawLine = (text: string, size = 12, color = rgb(0.2, 0.2, 0.2)) => {
+    page.drawText(text, { x: 48, y: cursorY, size, font, color });
+    cursorY -= size + 8;
+  };
+
+  // Title
+  drawLine('PDF could not be repaired', 20, rgb(0.75, 0, 0));
+  cursorY -= 8;
+
+  const reason = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+  const bodyLines = [
+    'We tried to repair your PDF, but the file is either too severely corrupted or not really a PDF document.',
+    'Reason:',
+    ...wrapText(reason, 80),
+    '',
+    'Suggested next steps:',
+    '  • double-check that you uploaded a valid PDF file (not another format renamed as .pdf)',
+    '  • recreate the PDF from the original source application if possible',
+    '  • try exporting/saving the file again to produce a clean PDF copy',
+  ];
+
+  bodyLines.forEach(line => drawLine(line));
+
+  if (originalBytes) {
+    cursorY -= 8;
+    drawLine('File details:', 13, rgb(0.1, 0.1, 0.1));
+    drawLine(`  • Uploaded size: ${originalBytes.length.toLocaleString()} bytes`);
+    drawLine(`  • Timestamp: ${new Date().toISOString()}`);
+  }
+
+  const bytes = await doc.save();
+  return Buffer.from(bytes);
+}
+
+function attemptSimplePdfRecovery(buffer: Buffer): Buffer | null {
+  const headerMarker = '%PDF-';
+  const eofMarker = '%%EOF';
+
+  const headerIndex = buffer.indexOf(headerMarker);
+  if (headerIndex === -1) {
+    console.warn('No %PDF header marker found while attempting recovery.');
+    return null;
+  }
+
+  let recovered = buffer.slice(headerIndex);
+
+  const eofIndex = recovered.lastIndexOf(eofMarker);
+  if (eofIndex === -1) {
+    console.warn('No %%EOF marker found. Appending one to recovered buffer.');
+    const appended = Buffer.alloc(recovered.length + 7);
+    recovered.copy(appended, 0);
+    appended.write('\n%%EOF\n', recovered.length);
+    recovered = appended;
+  } else {
+    const eofEnd = eofIndex + eofMarker.length;
+    if (eofEnd < recovered.length) {
+      recovered = recovered.slice(0, eofEnd + 1);
+    }
+  }
+
+  return recovered;
+}
+
 async function repairPDF(inputPath: string, options: any): Promise<Buffer> {
+  let originalPdfBytes: Buffer | null = null;
+
   try {
     console.log('Starting repair PDF process with options:', options);
     console.log('Input file path:', inputPath);
     
-    // Check if file exists
-    try {
-      await access(inputPath);
-    } catch (accessError) {
-      console.error('File access error:', accessError);
-      throw new Error(`PDF file not found at path: ${inputPath}`);
-    }
+    originalPdfBytes = await readFile(inputPath);
+    console.log('PDF file read, size:', originalPdfBytes.length);
     
-    const pdfBytes = await readFile(inputPath);
-    console.log('PDF file read, size:', pdfBytes.length);
-    
-    if (!pdfBytes || pdfBytes.length === 0) {
+    if (!originalPdfBytes || originalPdfBytes.length === 0) {
       throw new Error('PDF file is empty or could not be read');
     }
     
@@ -643,7 +795,7 @@ async function repairPDF(inputPath: string, options: any): Promise<Buffer> {
     let pdf;
     try {
       // First attempt with standard options
-      pdf = await PDFDocument.load(pdfBytes, { 
+      pdf = await PDFDocument.load(originalPdfBytes, { 
         ignoreEncryption: true,
         parseSpeed: 1 // Slower but more thorough parsing
       });
@@ -651,16 +803,70 @@ async function repairPDF(inputPath: string, options: any): Promise<Buffer> {
       console.warn('Initial PDF load failed, attempting recovery:', loadError.message);
       // Try with more lenient options
       try {
-        pdf = await PDFDocument.load(pdfBytes, { 
+        pdf = await PDFDocument.load(originalPdfBytes, { 
           ignoreEncryption: true,
           parseSpeed: 1
         });
       } catch (recoveryError: any) {
         console.error('PDF recovery failed:', recoveryError.message);
         console.error('Recovery error stack:', recoveryError.stack);
-        // Provide a more helpful error message
-        const errorMsg = recoveryError.message || 'Unknown error';
-        throw new Error(`Unable to repair PDF. The file may be severely corrupted or not a valid PDF. Error: ${errorMsg}`);
+
+        console.warn('Attempting simple header/EOF recovery of PDF bytes...');
+        const recoveredBytes = attemptSimplePdfRecovery(originalPdfBytes);
+
+        if (!recoveredBytes) {
+          console.warn('Header recovery failed. Trying Ghostscript repair...');
+          const gsBuffer = await attemptGhostscriptRepair(originalPdfBytes);
+
+          if (!gsBuffer) {
+            const errorMsg = recoveryError.message || 'Unknown error';
+            throw new Error(`Unable to repair PDF. The file may be severely corrupted or not a valid PDF. Error: ${errorMsg}`);
+          }
+
+          console.log('Ghostscript produced output, retrying load...');
+          try {
+            pdf = await PDFDocument.load(gsBuffer, {
+              ignoreEncryption: true,
+              parseSpeed: 1,
+            });
+            originalPdfBytes = gsBuffer;
+          } catch (gsLoadError: any) {
+            console.error('PDF load still failed after Ghostscript repair:', gsLoadError.message);
+            const errorMsg = gsLoadError.message || recoveryError.message || 'Unknown error';
+            throw new Error(`Unable to repair PDF. The file may be severely corrupted or not a valid PDF. Error: ${errorMsg}`);
+          }
+        } else {
+          console.log('Recovered potential PDF bytes. Retrying load...');
+          try {
+            pdf = await PDFDocument.load(recoveredBytes, {
+              ignoreEncryption: true,
+              parseSpeed: 1,
+            });
+            originalPdfBytes = recoveredBytes;
+          } catch (recoveredLoadError: any) {
+            console.error('Recovered PDF still failed to load:', recoveredLoadError.message);
+            console.warn('Trying Ghostscript repair as final attempt...');
+            const gsBuffer = await attemptGhostscriptRepair(originalPdfBytes);
+
+            if (!gsBuffer) {
+              const errorMsg = recoveredLoadError.message || recoveryError.message || 'Unknown error';
+              throw new Error(`Unable to repair PDF. The file may be severely corrupted or not a valid PDF. Error: ${errorMsg}`);
+            }
+
+            console.log('Ghostscript produced output, retrying load...');
+            try {
+              pdf = await PDFDocument.load(gsBuffer, {
+                ignoreEncryption: true,
+                parseSpeed: 1,
+              });
+              originalPdfBytes = gsBuffer;
+            } catch (gsLoadError: any) {
+              console.error('PDF load still failed after Ghostscript repair:', gsLoadError.message);
+              const errorMsg = gsLoadError.message || recoveredLoadError.message || recoveryError.message || 'Unknown error';
+              throw new Error(`Unable to repair PDF. The file may be severely corrupted or not a valid PDF. Error: ${errorMsg}`);
+            }
+          }
+        }
       }
     }
     
@@ -756,7 +962,18 @@ async function repairPDF(inputPath: string, options: any): Promise<Buffer> {
     return Buffer.from(pdfBytesResult);
   } catch (error) {
     console.error('Error in repairPDF function:', error);
-    throw error;
+
+    try {
+      console.warn('Repair failed, returning diagnostic PDF fallback.');
+      const fallback = await createRepairFailurePdf(error, originalPdfBytes);
+      return fallback;
+    } catch (fallbackError) {
+      console.error('Failed to create diagnostic PDF fallback:', fallbackError);
+      if (originalPdfBytes) {
+        return Buffer.from(originalPdfBytes);
+      }
+      throw error;
+    }
   }
 }
 
@@ -924,12 +1141,12 @@ async function addWatermark(inputPath: string, options: any): Promise<Buffer> {
         pagesToWatermark = Array.from({ length: end - start + 1 }, (_, i) => start + i);
         break;
       case 'specific':
-        const pageNumbers = specificPages.split(',').map(p => p.trim());
+        const pageNumbers = specificPages.split(',').map((p: string) => p.trim());
         pagesToWatermark = [];
         for (const pageStr of pageNumbers) {
           if (pageStr.includes('-')) {
             // Handle ranges like "1-3"
-            const [startStr, endStr] = pageStr.split('-').map(n => n.trim());
+            const [startStr, endStr] = pageStr.split('-').map((n: string) => n.trim());
             const start = parseInt(startStr);
             const end = parseInt(endStr);
             
@@ -966,14 +1183,14 @@ async function addWatermark(inputPath: string, options: any): Promise<Buffer> {
         pagesToWatermark = Array.from({ length: pageCount }, (_, i) => i);
     }
     
-    console.log('Pages to watermark (1-based):', pagesToWatermark.map(p => p + 1));
+    console.log('Pages to watermark (1-based):', pagesToWatermark.map((p: number) => p + 1));
     console.log('Pages to watermark (0-based indices):', pagesToWatermark);
     console.log('Total pages in document:', pageCount);
     
     // Sort and remove duplicates
     pagesToWatermark.sort((a, b) => a - b);
     const uniquePages = Array.from(new Set(pagesToWatermark));
-    console.log('Unique pages to watermark:', uniquePages.map(p => p + 1));
+    console.log('Unique pages to watermark:', uniquePages.map((p: number) => p + 1));
     
     // Prepare watermark resources
     let font = null;
@@ -1095,6 +1312,7 @@ export async function POST(request: NextRequest) {
     const files = formData.getAll('files') as File[];
     const optionsStr = formData.get('options') as string | null;
     const options = optionsStr ? JSON.parse(optionsStr) : {};
+    let originalFileBuffer: Buffer | null = null;
 
     console.log(`[${requestId}] Step 1: Form data parsed. Operation: ${operation}, Files: ${files.length}, Single file: ${file?.name || 'none'}`);
 
@@ -1121,6 +1339,7 @@ export async function POST(request: NextRequest) {
     }
 
     let resultBuffer: Buffer;
+    let repairFallbackUsed = false;
 
     console.log(`[${requestId}] Step 2: Starting ${operation} operation...`);
 
@@ -1178,10 +1397,19 @@ export async function POST(request: NextRequest) {
             
         case 'repair':
             console.log(`[${requestId}] Starting repair operation with options:`, options);
-            tempFilePath = await saveTempFile(Buffer.from(await file!.arrayBuffer()));
+            originalFileBuffer = Buffer.from(await file!.arrayBuffer());
+            tempFilePath = await saveTempFile(originalFileBuffer);
             console.log(`[${requestId}] Temporary file created: ${tempFilePath}`);
-            resultBuffer = await repairPDF(tempFilePath, options);
-            console.log(`[${requestId}] Repair operation completed successfully`);
+
+            try {
+              resultBuffer = await repairPDF(tempFilePath, options);
+              console.log(`[${requestId}] Repair operation completed successfully`);
+            } catch (repairError) {
+              console.error(`[${requestId}] Repair operation failed:`, repairError);
+              console.warn(`[${requestId}] Falling back to original file for repair operation`);
+              resultBuffer = originalFileBuffer;
+              repairFallbackUsed = true;
+            }
             break;
             
         case 'ocr':
@@ -1219,6 +1447,7 @@ export async function POST(request: NextRequest) {
       console.error(`[${requestId}] Detailed Error:`, error.message);
     }
     
+
     return NextResponse.json(
       { 
         error: 'Processing failed', 
